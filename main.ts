@@ -708,11 +708,12 @@ class LinkLinkView extends ItemView {
             'Interlink Vault?',
             'This will write a related: field to every note in your vault, connecting each one to its most semantically similar notes. Existing related: fields will be replaced. Notes in ignored or read-only paths are left untouched.',
             async () => {
+              const { onProgress, onDone, onError } = this.plugin.createProgressDisplay();
               try {
                 const index = await this.plugin.loadAnyIndex();
-                const { updated } = await this.plugin.interlinkService.run(index, () => {});
-                new Notice(`Interlinked vault — updated ${updated} notes.`);
-              } catch (e) { new Notice(`Error: ${e instanceof Error ? e.message : String(e)}`); }
+                const { updated } = await this.plugin.interlinkService.run(index, onProgress);
+                onDone(`Interlinked vault — updated ${updated} notes.`);
+              } catch (e) { onError(); new Notice(`Error: ${e instanceof Error ? e.message : String(e)}`); }
             },
             'Interlink'
           ).open();
