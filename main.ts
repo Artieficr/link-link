@@ -63,7 +63,7 @@ interface LinkLinkSettings {
 }
 
 const DEFAULT_SETTINGS: LinkLinkSettings = {
-  topN: 30,
+  topN: 15,
   threshold: 0.5,
   embeddingSource: 'builtin',
   copilotIndexPath: '',
