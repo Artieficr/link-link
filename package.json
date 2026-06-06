@@ -1,0 +1,22 @@
+{
+  "name": "link-link",
+  "version": "1.0.0",
+  "description": "Semantic related notes panel",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs"
+  },
+  "keywords": [],
+  "author": "Artie",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "25.9.1",
+    "esbuild": "^0.28.0",
+    "obsidian": "1.13.0",
+    "typescript": "6.0.3"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2"
+  }
+}

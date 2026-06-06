@@ -1,0 +1,10 @@
+{
+  "id": "link-link",
+  "name": "Link Link!",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Semantic related notes panel using Copilot index or Ollama embeddings",
+  "author": "Artie",
+  "authorUrl": "https://github.com/Artieficr",
+  "isDesktopOnly": true
+}

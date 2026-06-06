@@ -1,0 +1,195 @@
+import { App, Modal, TFile } from 'obsidian';
+import type LinkLinkPlugin from './main';
+import type { IndexEntry } from './indexing';
+
+// ─── Confirmation modal ───────────────────────────────────────────────────────
+
+export class ConfirmModal extends Modal {
+  private message: string;
+  private detail: string;
+  private onConfirm: () => void;
+  private confirmText: string;
+  private destructive: boolean;
+
+  constructor(
+    app: App,
+    message: string,
+    detail: string,
+    onConfirm: () => void,
+    confirmText = 'Continue',
+    destructive = false
+  ) {
+    super(app);
+    this.message     = message;
+    this.detail      = detail;
+    this.onConfirm   = onConfirm;
+    this.confirmText = confirmText;
+    this.destructive = destructive;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: this.message });
+    contentEl.createEl('p',  { text: this.detail, cls: 'll-modal-detail' });
+    const row = contentEl.createEl('div', { cls: 'll-modal-btns' });
+    row.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
+    const ok = row.createEl('button', {
+      text: this.confirmText,
+      cls: this.destructive ? 'll-btn-danger' : 'll-btn-accent'
+    });
+    ok.addEventListener('click', () => { this.close(); this.onConfirm(); });
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+// ─── Interlink service ────────────────────────────────────────────────────────
+
+export class InterlinkService {
+  private app: App;
+  private plugin: LinkLinkPlugin;
+
+  constructor(app: App, plugin: LinkLinkPlugin) {
+    this.app    = app;
+    this.plugin = plugin;
+  }
+
+  // ── Path helpers ────────────────────────────────────────────────────────
+
+  isIgnored(filePath: string): boolean {
+    const { ignoredPaths, indexMode, excludePaths, includePaths } = this.plugin.settings;
+
+    if (this.matchesList(filePath, ignoredPaths)) return true;
+
+    if (indexMode === 'exclude') {
+      if (this.matchesList(filePath, excludePaths)) return true;
+    } else if (indexMode === 'include' && includePaths.length > 0) {
+      if (!this.matchesList(filePath, includePaths)) return true;
+    }
+
+    return false;
+  }
+
+  isReadOnly(filePath: string): boolean {
+    return this.matchesList(filePath, this.plugin.settings.readOnlyPaths);
+  }
+
+  private matchesList(filePath: string, list: string[]): boolean {
+    for (const p of list) {
+      const norm = p.replace(/\/$/, '');
+      if (filePath === norm || filePath === norm + '.md' || filePath.startsWith(norm + '/')) return true;
+    }
+    return false;
+  }
+
+  // ── Similarity ───────────────────────────────────────────────────────────
+
+  private cosine(a: number[], b: number[]): number {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i];
+    }
+    const d = Math.sqrt(na) * Math.sqrt(nb);
+    return d === 0 ? 0 : dot / d;
+  }
+
+  findRelated(entry: IndexEntry, pool: IndexEntry[]): string[] {
+    const { topN, threshold } = this.plugin.settings;
+    const scores: { title: string; score: number }[] = [];
+
+    for (const other of pool) {
+      if (other.path === entry.path) continue;
+      const score = this.cosine(entry.embedding, other.embedding);
+      if (score >= threshold) scores.push({ title: other.title, score });
+    }
+
+    const sorted = scores.sort((a, b) => b.score - a.score);
+    return (topN === 0 ? sorted : sorted.slice(0, topN)).map(s => s.title);
+  }
+
+  // ── Frontmatter I/O ──────────────────────────────────────────────────────
+
+  // ── Scan for existing field ───────────────────────────────────────────────
+
+  async findNotesWithRelated(): Promise<TFile[]> {
+    const field  = this.plugin.settings.relatedFieldName || 'related';
+    const result: TFile[] = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (this.isIgnored(file.path) || this.isReadOnly(file.path)) continue;
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache?.frontmatter?.[field] !== undefined) result.push(file);
+    }
+    return result;
+  }
+
+  // ── Main: interlink vault ─────────────────────────────────────────────────
+
+  async run(
+    index: IndexEntry[],
+    onProgress: (msg: string, pct: number) => void
+  ): Promise<{ updated: number; skipped: number }> {
+    const field    = this.plugin.settings.relatedFieldName || 'related';
+    const pool     = index.filter(e => !this.isIgnored(e.path));
+    const writable = pool.filter(e => !this.isReadOnly(e.path));
+    let updated    = 0;
+
+    for (let i = 0; i < writable.length; i++) {
+      const entry = writable[i];
+      onProgress(`${entry.title} (${i + 1} / ${writable.length})`, (i / writable.length) * 95);
+
+      const links = this.findRelated(entry, pool);
+      const file  = this.app.vault.getFileByPath(entry.path);
+      if (!file) continue;
+
+      // Use Obsidian's frontmatter API — handles YAML parsing/writing correctly
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
+      });
+
+      if (links.length > 0) updated++;
+    }
+
+    onProgress(`Done — updated ${updated} notes.`, 100);
+    return { updated, skipped: writable.length - updated };
+  }
+
+  async runForFile(file: TFile, index: IndexEntry[]): Promise<boolean> {
+    if (this.isIgnored(file.path) || this.isReadOnly(file.path)) return false;
+    const field = this.plugin.settings.relatedFieldName || 'related';
+    const pool  = index.filter(e => !this.isIgnored(e.path));
+    const entry = pool.find(e => e.path === file.path);
+    if (!entry) return false;
+    const links = this.findRelated(entry, pool);
+    await this.app.fileManager.processFrontMatter(file, fm => {
+      if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
+      else delete fm[field];
+    });
+    return true;
+  }
+
+  // ── Clear related field ───────────────────────────────────────────────────
+
+  async clearRelated(
+    onProgress: (msg: string, pct: number) => void
+  ): Promise<number> {
+    const field = this.plugin.settings.relatedFieldName || 'related';
+    const files = this.app.vault.getMarkdownFiles();
+    let cleared = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      onProgress(`Scanning… (${i + 1} / ${files.length})`, (i / files.length) * 100);
+
+      if (this.isIgnored(file.path) || this.isReadOnly(file.path)) continue;
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache?.frontmatter?.[field] === undefined) continue;
+
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        delete fm[field];
+      });
+      cleared++;
+    }
+
+    return cleared;
+  }
+}

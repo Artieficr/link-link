@@ -1,0 +1,892 @@
+/* contentEl gets this class — it already fills the panel height */
+.ll-container {
+  display: flex !important;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 0.9em;
+}
+
+/* ── Header ── */
+
+.ll-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  position: relative;
+  z-index: 1;
+}
+
+.ll-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.ll-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+
+/* Icon toggle: list ↔ graph */
+.ll-view-toggle {
+  position: relative;
+  width: 46px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--background-modifier-border);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 150ms;
+}
+.ll-view-toggle.is-graph {
+  background: var(--interactive-accent);
+}
+.ll-view-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 150ms;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.ll-view-toggle.is-graph .ll-view-toggle-knob {
+  transform: translateX(22px);
+}
+.ll-view-toggle-knob svg {
+  width: 11px;
+  height: 11px;
+  color: var(--text-muted);
+}
+.ll-view-toggle.is-graph .ll-view-toggle-knob svg {
+  color: var(--interactive-accent);
+}
+
+/* ── List view ── */
+
+.ll-list-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+
+.ll-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ll-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ll-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ll-score {
+  font-family: var(--font-monospace);
+  font-size: 0.8em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  min-width: 3.2em;
+  text-align: center;
+}
+
+.ll-link {
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.ll-item:hover { cursor: grab; }
+
+/* Not connected — accent button, always visible (call to action) */
+.ll-item-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  opacity: 1;
+  transition: opacity 120ms;
+}
+.ll-item-link-btn:hover { opacity: 0.82; }
+.ll-item-link-btn svg   { width: 13px; height: 13px; }
+
+/* Connected — fades out, ghost on row hover, unlink on button hover */
+.ll-item-link-btn.is-connected                { background: none; color: var(--text-faint); opacity: 0; }
+.ll-item:hover .ll-item-link-btn.is-connected { opacity: 1; }
+.ll-item-link-btn.is-connected:hover          { background: var(--background-modifier-hover); color: var(--text-normal); opacity: 1; }
+
+.ll-link:hover {
+  color: var(--text-accent);
+}
+
+/* ── Graph view ── */
+
+.ll-graph-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.ll-graph {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: default;
+}
+
+/* Legend — flex-shrink: 0 keeps it always visible */
+.ll-legend {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ll-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75em;
+  color: var(--text-muted);
+}
+
+.ll-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ll-legend-hint {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* ── Drag ghost ── */
+
+.ll-drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -120%);
+  white-space: nowrap;
+}
+
+/* ── Shared states ── */
+
+.ll-empty,
+.ll-loading,
+.ll-error {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  padding: 12px 8px;
+}
+
+.ll-error { color: var(--text-error); }
+
+.ll-emb-error { padding: 8px; }
+.ll-error-hint { color: var(--text-muted); font-size: 0.85em; margin-top: 4px; }
+
+.ll-reindex-row { margin-top: 10px; }
+
+.ll-reindex-btn {
+  padding: 5px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.ll-reindex-btn:disabled { opacity: 0.6; cursor: default; }
+
+.ll-progress-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.ll-progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--interactive-accent);
+  border-radius: 2px;
+}
+.ll-progress-bar.indeterminate {
+  width: 40%;
+  animation: ll-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes ll-indeterminate {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(370%); }
+}
+
+/* ── Settings: tabs ── */
+
+.ll-tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.ll-tab {
+  padding: 5px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  font-weight: 400;
+}
+.ll-tab:hover:not(.active) {
+  background: rgba(128, 128, 128, 0.08);
+  color: var(--text-normal);
+}
+.ll-tab.active {
+  background: rgba(128, 128, 128, 0.14);
+  color: var(--text-normal);
+  font-weight: 600;
+}
+.ll-tab-body { padding: 0; }
+
+/* ── Settings: two-column filter section ── */
+
+.ll-filter-section {
+  margin: 8px 0;
+}
+.ll-filter-mode-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ll-filter-mode-label { font-weight: 600; font-size: 0.9em; color: var(--text-normal); white-space: nowrap; }
+
+.ll-filter-body {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.ll-filter-title { font-weight: 600; font-size: 0.88em; color: var(--text-normal); margin-bottom: 4px; }
+.ll-filter-desc  { font-size: 0.80em; color: var(--text-muted); line-height: 1.4; }
+
+.ll-filter-right { display: flex; flex-direction: column; }
+
+.ll-chip-zone {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px;
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+  background: var(--background-primary);
+}
+.ll-chip-empty {
+  width: 100%;
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 0.85em;
+  padding: 6px 0;
+}
+.ll-chip-icon     { display: inline-flex; align-items: center; }
+.ll-chip-icon svg { width: 11px; height: 11px; opacity: 0.6; }
+
+.ll-filter-add-row { display: flex; justify-content: flex-end; margin-top: 5px; }
+.ll-filter-add {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 5px; border: none; cursor: pointer;
+  background: var(--interactive-accent); color: var(--text-on-accent); font-size: 0.82em;
+}
+.ll-filter-add svg { width: 11px; height: 11px; }
+.ll-filter-add:hover { opacity: 0.88; }
+
+/* ── Settings: action section (index vault / interlink) ── */
+
+/* Interlink description (inside the action card) */
+.ll-interlink-lead   { font-weight: 600; margin: 0 0 6px; font-size: 0.88em; }
+.ll-interlink-body   { font-size: 0.83em; line-height: 1.5; margin: 0 0 6px; }
+.ll-interlink-footer { font-size: 0.83em; font-style: italic; margin: 0 0 10px; }
+
+/* Interlink button row — interlink on left, clear on right */
+.ll-il-btn-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ll-action-section {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 6px 0 12px;
+}
+.ll-action-section.ll-action-section-flat { border: none; }
+.ll-il-spacer { height: 12px; }
+
+
+/* Model info block (built-in source) */
+.ll-model-info      { padding: 8px 10px; background: var(--background-secondary); border-radius: 6px; margin: 6px 0 10px; }
+.ll-model-info-name { font-weight: 600; font-size: 0.88em; color: var(--text-normal); margin-bottom: 3px; }
+.ll-model-info-desc { font-size: 0.82em; color: var(--text-muted); line-height: 1.4; margin-bottom: 5px; }
+.ll-model-info-link { font-size: 0.82em; color: var(--text-accent); cursor: pointer; text-decoration: none; }
+.ll-model-info-link:hover { text-decoration: underline; }
+
+/* Danger button (destructive confirm) */
+.ll-btn-danger {
+  padding: 5px 14px; border-radius: 5px; border: none; cursor: pointer;
+  background: #c62828 !important; color: #ffffff !important; font-size: 0.85em;
+}
+.ll-btn-danger:hover { background: #b71c1c !important; }
+
+/* ── Settings: progress bar ── */
+
+.ll-settings-prog {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.ll-prog-pct {
+  font-size: 1.5em;
+  font-weight: 700;
+  color: var(--text-normal);
+  margin: 0 0 4px;
+  line-height: 1;
+  min-height: 1.5em;
+}
+.ll-prog-phrase {
+  font-size: 0.83em;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0 0 6px;
+  min-height: 1.2em;
+  transition: opacity 0.22s ease;
+}
+.ll-prog-label { margin: 0 0 6px; font-size: 0.85em; color: var(--text-muted); }
+
+/* ── Settings: chip field ── */
+
+.ll-chip-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0 2px;
+  align-items: center;
+  min-height: 32px;
+}
+.ll-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: color-mix(in srgb, var(--background-modifier-border) 35%, transparent);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px 6px 2px 8px;
+  font-size: 0.83em;
+  color: var(--text-normal);
+}
+.ll-chip-text { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ll-chip .ll-chip-x {
+  background: none; border: none; box-shadow: none; outline: none; cursor: pointer;
+  color: inherit; font-size: 1em; padding: 0 2px; line-height: 1;
+}
+.ll-chip .ll-chip-x:hover { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); border-radius: 3px; }
+.ll-chip-add {
+  background: none; border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px; padding: 2px 8px; font-size: 0.83em;
+  color: var(--text-muted); cursor: pointer;
+}
+.ll-chip-add:hover { border-color: var(--interactive-accent); color: var(--interactive-accent); }
+.ll-chip-input {
+  border: 1px solid var(--interactive-accent); border-radius: 4px;
+  padding: 2px 8px; font-size: 0.83em; background: var(--background-primary);
+  color: var(--text-normal); min-width: 140px;
+}
+
+/* ── Settings: mode toggle (Exclude / Only include) ── */
+
+.ll-mode-row {
+  display: flex;
+  gap: 4px;
+  padding: 6px 0 4px;
+}
+.ll-mode-btn {
+  padding: 4px 12px; border-radius: 5px; font-size: 0.85em; cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary); color: var(--text-muted);
+}
+.ll-mode-btn.active {
+  background: var(--interactive-accent); color: var(--text-on-accent); border-color: var(--interactive-accent);
+}
+.ll-mode-desc { font-size: 0.82em; color: var(--text-muted); margin: 0 0 8px; }
+
+/* ── Settings: indexation / interlink sections ── */
+
+.ll-idx-section, .ll-il-section {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.ll-idx-desc { font-size: 0.85em; color: var(--text-muted); margin: 0 0 10px; line-height: 1.5; }
+.ll-idx-row  { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* In-section separator (lighter spacing than ll-restore-sep) */
+.ll-section-sep {
+  margin: 14px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ll-action-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 5px; border: none; cursor: pointer;
+  background: var(--interactive-accent); color: var(--text-on-accent); font-size: 0.85em;
+}
+.ll-action-btn:hover:not(:disabled) { opacity: 0.88; }
+.ll-action-btn:disabled { opacity: 0.5; cursor: default; }
+.ll-action-btn-secondary {
+  background: var(--background-modifier-border); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+}
+.ll-action-btn-secondary:hover:not(:disabled) { background: var(--background-modifier-hover); }
+.ll-action-btn-danger {
+  background: #c62828; color: #ffffff;
+  border: 1px solid #c62828;
+}
+.ll-action-btn.ll-action-btn-danger:hover:not(:disabled) {
+  background: #b71c1c; border-color: #b71c1c;
+  color: #ffffff; opacity: 1;
+}
+.ll-action-btn.ll-action-btn-accent {
+  background: var(--interactive-accent); color: var(--text-on-accent);
+  border: 1px solid var(--interactive-accent); font-weight: 600;
+}
+.ll-action-btn.ll-action-btn-accent:hover:not(:disabled) { opacity: 0.88; }
+.ll-btn-icon { display: inline-flex; align-items: center; }
+.ll-btn-icon svg { width: 13px; height: 13px; }
+
+/* ── Header icon buttons (graph mode) ── */
+
+.ll-icon-btn {
+  position: relative;
+  width: 24px; height: 24px;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--text-on-accent);
+  flex-shrink: 0;
+  background: var(--interactive-accent);
+}
+.ll-icon-btn:hover, .ll-icon-btn-busy {
+  opacity: 0.82;
+  color: var(--text-on-accent);
+}
+.ll-icon-btn svg { width: 13px; height: 13px; }
+
+.ll-icon-btn-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 170px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.8em;
+  line-height: 1.45;
+  white-space: normal;
+  color: var(--text-normal);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ll-icon-btn-tip-left { right: auto; left: 0; }
+.ll-icon-btn-tip-title { font-size: 0.95em; }
+.ll-icon-btn:hover .ll-icon-btn-tip { opacity: 1; }
+
+/* ── Settings: modal ── */
+
+.ll-modal-detail { color: var(--text-muted); font-size: 0.9em; margin: 6px 0 16px; }
+.ll-modal-btns   { display: flex; justify-content: flex-end; gap: 8px; }
+.ll-btn-accent   {
+  padding: 5px 14px; border-radius: 5px; border: none; cursor: pointer;
+  background: var(--interactive-accent); color: var(--text-on-accent); font-size: 0.85em;
+}
+
+/* ── Settings: embedding model ── */
+
+.ll-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--text-faint);
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: help;
+  margin-left: 6px;
+  background: none;
+  padding: 0;
+  vertical-align: middle;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.ll-help-btn:hover { color: var(--text-muted); border-color: var(--text-muted); }
+
+.ll-emb-tooltip {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  width: 290px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  font-size: 0.82em;
+}
+.ll-emb-tooltip.visible { display: block; }
+.ll-wide-tooltip { width: 340px; }
+
+.ll-tip-item { padding: 6px 0; }
+.ll-tip-item + .ll-tip-item { border-top: 1px solid var(--background-modifier-border); }
+.ll-tip-title { font-weight: 600; color: var(--text-normal); margin-bottom: 2px; }
+.ll-tip-body  { color: var(--text-muted); line-height: 1.4; }
+
+.ll-model-note {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  padding: 4px 0 8px 0;
+  margin: 0;
+}
+
+.ll-model-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0 8px;
+}
+.ll-model-header-title { font-weight: 600; color: var(--text-normal); }
+.ll-model-btns { display: flex; gap: 8px; }
+.ll-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.ll-model-btn svg { width: 13px; height: 13px; }
+.ll-model-btn:hover { background: var(--background-modifier-hover); }
+.ll-model-btn-accent {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.ll-model-btn-accent:hover { opacity: 0.9; }
+
+/* ── Index progress popup ── */
+
+.ll-idx-popup {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  width: 310px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);
+}
+
+.ll-idx-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ll-idx-popup-title {
+  font-weight: 600;
+  font-size: 0.88em;
+  color: var(--text-normal);
+}
+
+.ll-idx-popup-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 2px;
+}
+.ll-idx-popup-close:hover { color: var(--text-muted); }
+
+.ll-idx-popup-phrase {
+  font-size: 0.83em;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 10px;
+  min-height: 1.3em;
+  transition: opacity 0.22s ease;
+}
+
+.ll-idx-popup .ll-progress-wrap { margin-top: 0; margin-bottom: 8px; }
+
+.ll-idx-popup-status {
+  font-size: 0.78em;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Change detection (mtime source) ── */
+
+.ll-mtime-desc {
+  font-size: 0.80em;
+  line-height: 1.5;
+  margin: 4px 0 8px;
+}
+
+.ll-mtime-field-wrap { margin-top: 2px; }
+
+.ll-restore-sep {
+  margin: 24px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Per-setting reset button */
+.ll-reset-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  padding: 2px 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ll-reset-btn:hover { color: var(--text-muted); background: var(--background-modifier-hover); }
+.ll-reset-btn svg   { width: 13px; height: 13px; }
+
+/* ── Index delete selector ── */
+
+.ll-idx-delete-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ll-idx-select {
+  max-width: 260px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.ll-idx-select:focus { border-color: var(--interactive-accent); outline: none; }
+.ll-idx-select option:disabled { color: var(--text-faint); }
+
+/* ── Local model (Ollama) model list ── */
+
+.ll-model-area { margin: 4px 0 10px; }
+.ll-model-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+
+.ll-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.ll-model-active-cell {
+  flex-shrink: 0;
+  width: 20px;
+  display: flex;
+  justify-content: center;
+}
+.ll-model-active-chk { cursor: pointer; accent-color: var(--interactive-accent); }
+
+.ll-model-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.88em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.ll-model-slug {
+  font-family: var(--font-monospace);
+  font-size: 0.82em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.ll-model-conn-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ll-model-check-btn {
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: 0.8em;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ll-model-check-btn:hover:not(:disabled) { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ll-model-check-btn:disabled { opacity: 0.5; cursor: default; }
+
+.ll-conn-badge {
+  font-size: 0.78em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ll-conn-badge-ok   { background: color-mix(in srgb, #22c55e 18%, transparent); color: #16a34a; }
+.ll-conn-badge-warn { background: color-mix(in srgb, #eab308 18%, transparent); color: #a16207; }
+.ll-conn-badge-fail { background: color-mix(in srgb, #ef4444 18%, transparent); color: #dc2626; }
+
+.ll-model-icon-btn {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; border: none;
+  background: none; cursor: pointer; color: var(--text-muted);
+  padding: 0;
+}
+.ll-model-icon-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ll-model-icon-btn.ll-model-icon-btn-danger:hover {
+  color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 10%, transparent);
+}
+.ll-model-icon-btn svg { width: 13px; height: 13px; }
+
+.ll-model-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 0.85em;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 5px;
+  margin: 4px 0 8px;
+}
+
+/* ── Ollama model modal ── */
+
+.ll-modal-heading {
+  font-size: 1em;
+  font-weight: 700;
+  margin: 0 0 16px;
+  color: var(--text-normal);
+}
+.ll-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.ll-modal-field { display: flex; flex-direction: column; gap: 4px; }
+.ll-modal-label { font-size: 0.85em; font-weight: 600; color: var(--text-normal); }
+.ll-modal-required { color: var(--text-error); }
+.ll-modal-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.88em;
+  box-sizing: border-box;
+}
+.ll-modal-input:focus { border-color: var(--interactive-accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 20%, transparent); }
+.ll-modal-hint  { font-size: 0.8em; color: var(--text-muted); margin: 0; }
+.ll-modal-error { font-size: 0.82em; color: var(--text-error); margin: 0; }
