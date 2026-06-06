@@ -8,8 +8,6 @@
 
 No cloud services, no subscriptions, no data leaving your machine. Private by default.
 
----
-
 ## Features
 
 - **Live similarity panel** — updates automatically as you switch notes. Similar notes are ranked by a `0.00–1.00` similarity score, where 0 is not similar at all and 1 is an identical note.
@@ -33,7 +31,6 @@ No cloud services, no subscriptions, no data leaving your machine. Private by de
     - _Auto-index_ — choose when the index updates: manually only, on Obsidian startup, or automatically on every file save.
     - _Changes detection_ — by default the plugin uses the OS file modification timestamp to skip unchanged notes. If your sync tool (Dropbox, iCloud, etc.) overwrites timestamps on transfer, you can point it at a custom frontmatter date field combined with [Linter](https://github.com/platers/obsidian-linter) plugin.
     - _Indexing progress display_ — choose between a floating pop-up window, standard Obsidian notifications, or silent background indexing.
----
 
 ## Requirements
 
@@ -41,8 +38,6 @@ No cloud services, no subscriptions, no data leaving your machine. Private by de
 - Desktop only (Windows, macOS, Linux)
 - For the **Copilot backend**: [Obsidian Copilot](https://github.com/logancyang/obsidian-copilot) plugin installed and vault indexed
 - For the **Local model (Ollama) backend**: [Ollama](https://ollama.com/) installed, running, and the desired embedding model pulled (`ollama pull <model-name>`)
-
----
 
 ## Installation
 
@@ -60,16 +55,12 @@ No cloud services, no subscriptions, no data leaving your machine. Private by de
 3. Reload Obsidian
 4. Enable **Link Link!** in Settings → Community Plugins
 
----
-
 ## Quick Start
 
 1. Open the **Link Link!** panel via the ribbon icon or **Command palette → Link Link!: Open related notes panel**
 2. Go to **Settings → Link Link! → Embedding → Index vault** and click **Index vault** to build the index for the first time. Indexing runs in the background and may take few minutes for large vaults.
 3. Navigate to any note — the panel updates automatically
 4. Click any result to open it, or drag and drop a node outside the panel into the editor to paste a `[[link]]`
-
----
 
 ## How It Works
 
@@ -83,13 +74,9 @@ The **Ollama backend** calls your locally-running Ollama server at `POST /api/em
 
 The index stores one embedding vector per note. On subsequent runs, only notes whose modification timestamp has changed are re-embedded — so incremental indexing is fast even for large vaults.
 
----
-
 ## Privacy
 
 Everything runs on your machine. No notes, embeddings, or metadata are ever sent anywhere.
-
----
 
 ## Contributing
 
@@ -98,8 +85,6 @@ I'm not a software engineer. I created this plugin with [Claude](https://claude.
 Bug reports and feature suggestions are welcome.
 
 Feel free to initiate issues and pull requests [github.com/Artieficr/link-link](https://github.com/Artieficr/link-link).
-
----
 
 ## License
 
