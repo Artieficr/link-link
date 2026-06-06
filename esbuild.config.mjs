@@ -2,8 +2,12 @@ import esbuild from 'esbuild';
 import process from 'process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const transformersRequire = createRequire(require.resolve('@xenova/transformers'));
+const onnxWebPath = path.dirname(transformersRequire.resolve('onnxruntime-web/package.json'));
 
 const prod = process.argv[2] === 'production';
 
@@ -35,9 +39,6 @@ esbuild.build({
   // Alias it to onnxruntime-web's package dir so the bundled wasm backend is
   // used instead. onnxruntime-web is a transitive dep under @xenova/transformers.
   alias: {
-    'onnxruntime-node': path.resolve(
-      __dirname,
-      'node_modules/.pnpm/onnxruntime-web@1.14.0/node_modules/onnxruntime-web'
-    ),
+    'onnxruntime-node': onnxWebPath,
   },
 }).catch(() => process.exit(1));
