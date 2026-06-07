@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import * as nFs   from 'node:fs';
 import * as nPath from 'node:path';
-import { App, Notice, TFile } from 'obsidian';
+import { App, Notice, TFile, requestUrl } from 'obsidian';
 import type LinkLinkPlugin from './main';
 
 export interface IndexEntry {
@@ -14,7 +14,7 @@ export interface IndexEntry {
 export class IndexingService {
   private app: App;
   private plugin: LinkLinkPlugin;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pipeline() returns an untyped object from @xenova/transformers which has no public TypeScript types
   private embedder: any = null;
 
   constructor(app: App, plugin: LinkLinkPlugin) {
@@ -25,7 +25,7 @@ export class IndexingService {
   // ── Model ─────────────────────────────────────────────────────────────────
 
   private get pluginDir(): string {
-    return this.plugin.manifest.dir ?? '.obsidian/plugins/link-link';
+    return this.plugin.manifest.dir ?? `${this.app.vault.configDir}/plugins/link-link`;
   }
 
   private get pluginAbsPath(): string {
@@ -49,9 +49,9 @@ export class IndexingService {
     const base = (active.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
     onProgress('Connecting to Ollama…', 2);
     try {
-      const resp = await fetch(`${base}/api/tags`);
-      if (!resp.ok) throw new Error(`Ollama returned ${resp.status}`);
-      const data = await resp.json() as { models?: { name: string }[] };
+      const resp = await requestUrl(`${base}/api/tags`);
+      if (resp.status !== 200) throw new Error(`Ollama returned ${resp.status}`);
+      const data = resp.json as { models?: { name: string }[] };
       const installed = data.models ?? [];
       const found = installed.some(
         (m: { name: string }) => m.name === active.modelName || m.name.startsWith(active.modelName + ':')
@@ -99,7 +99,7 @@ export class IndexingService {
       const simdUrl = wasmBlob('ort-wasm-simd.wasm');
       const baseUrl = wasmBlob('ort-wasm.wasm');
       if (simdUrl || baseUrl) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- env.backends.onnx.wasm type is not publicly typed in onnxruntime-web
         (env.backends.onnx.wasm as any).wasmPaths = {
           ...(simdUrl ? { 'ort-wasm-simd.wasm': simdUrl } : {}),
           ...(baseUrl ? { 'ort-wasm.wasm':      baseUrl } : {}),
@@ -133,7 +133,7 @@ export class IndexingService {
         'Xenova/bge-small-en-v1.5',
         {
           quantized: true,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- progress_callback parameter type is not exported from @xenova/transformers
           progress_callback: (p: any) => {
             if (p.status === 'downloading') {
               onProgress(`Downloading model: ${p.file} (${Math.round(p.progress ?? 0)}%)`, 2 + (p.progress ?? 0) * 0.06);
@@ -160,16 +160,16 @@ export class IndexingService {
       const active = models.find(m => m.active);
       if (!active) throw new Error('No active Ollama model configured');
       const base = (active.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
-      const resp = await fetch(`${base}/api/embeddings`, {
+      const resp = await requestUrl({
+        url: `${base}/api/embeddings`,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: active.modelName, prompt: text }),
       });
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '');
-        throw new Error(`Ollama error ${resp.status}: ${errText}`);
+      if (resp.status !== 200) {
+        throw new Error(`Ollama error ${resp.status}: ${resp.text}`);
       }
-      const data = await resp.json() as { embedding: number[] };
+      const data = resp.json as { embedding: number[] };
       if (!Array.isArray(data.embedding)) throw new Error('Ollama returned no embedding');
       return data.embedding;
     }

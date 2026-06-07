@@ -12,6 +12,7 @@ import {
   TFile,
   TFolder,
   WorkspaceLeaf,
+  requestUrl,
   setIcon,
 } from 'obsidian';
 import { IndexingService, type IndexEntry } from './indexing';
@@ -156,13 +157,13 @@ function scoreToColor(score: number, s: LinkLinkSettings, minScore = 0, maxScore
 // Fixed-position tooltip for list items (avoids overflow-y:auto clipping).
 // Returns a cleanup function; caller must call it on mouseleave.
 function showListTip(anchor: HTMLElement, title: string, body: string, align: 'left' | 'right' = 'left'): () => void {
-  const tip = document.body.createEl('div', { cls: 'll-list-tip' });
+  const tip = activeDocument.body.createEl('div', { cls: 'll-list-tip' });
   tip.createEl('strong', { text: title, cls: 'll-list-tip-title' });
   tip.createEl('span',   { text: body,  cls: 'll-list-tip-body' });
   const r = anchor.getBoundingClientRect();
-  tip.style.top = (r.bottom + 4) + 'px';
-  if (align === 'right') tip.style.right = (window.innerWidth - r.right) + 'px';
-  else                   tip.style.left  = r.left + 'px';
+  tip.setCssStyles({ top: (r.bottom + 4) + 'px' });
+  if (align === 'right') tip.setCssStyles({ right: (window.innerWidth - r.right) + 'px' });
+  else                   tip.setCssStyles({ left: r.left + 'px' });
   return () => tip.remove();
 }
 
@@ -239,8 +240,8 @@ class GraphSimulation {
     this.onInsertLink    = onInsertLink;
     this.onContextMenu   = onContextMenu;
     this.onToggleRelated = onToggleRelated;
-    this.dark        = document.body.classList.contains('theme-dark');
-    this.accentColor = getComputedStyle(document.body).getPropertyValue('--interactive-accent').trim() || '#8b5cf6';
+    this.dark        = activeDocument.body.classList.contains('theme-dark');
+    this.accentColor = getComputedStyle(activeDocument.body).getPropertyValue('--interactive-accent').trim() || '#8b5cf6';
     this.ctx  = canvas.getContext('2d')!;
 
     // Relative color range: exclude score=0 (linked-but-unindexed) from range
@@ -314,9 +315,9 @@ class GraphSimulation {
   start() {
     const tick = () => {
       if (this.W > 0) { this.step(); this.draw(); }
-      this.animFrame = requestAnimationFrame(tick);
+      this.animFrame = window.requestAnimationFrame(tick);
     };
-    this.animFrame = requestAnimationFrame(tick);
+    this.animFrame = window.requestAnimationFrame(tick);
     if (this.settings.autoFit) {
       this.autoFitTimer = window.setTimeout(() => this.animateToFit(), 2500);
     }
@@ -324,7 +325,7 @@ class GraphSimulation {
 
   stop() {
     if (this.animFrame    !== null) { cancelAnimationFrame(this.animFrame);  this.animFrame    = null; }
-    if (this.autoFitTimer !== null) { clearTimeout(this.autoFitTimer);       this.autoFitTimer = null; }
+    if (this.autoFitTimer !== null) { window.clearTimeout(this.autoFitTimer);       this.autoFitTimer = null; }
     this.ghostEl?.remove(); this.ghostEl = null;
   }
 
@@ -376,7 +377,7 @@ class GraphSimulation {
 
   private scheduleAutoFit() {
     if (!this.settings.autoFit) return;
-    if (this.autoFitTimer !== null) clearTimeout(this.autoFitTimer);
+    if (this.autoFitTimer !== null) window.clearTimeout(this.autoFitTimer);
     this.autoFitTimer = window.setTimeout(() => this.animateToFit(), 5000);
   }
 
@@ -412,12 +413,12 @@ class GraphSimulation {
       this.dragStartX  = e.clientX;
       this.dragStartY  = e.clientY;
       this.inGhostMode = false;
-      this.canvas.style.cursor = 'grabbing';
+      this.canvas.setCssStyles({ cursor: 'grabbing' });
     } else {
       this.isPanning = true;
       this.panMouseX = e.clientX; this.panMouseY = e.clientY;
       this.panStartX = this.panX;  this.panStartY = this.panY;
-      this.canvas.style.cursor = 'grabbing';
+      this.canvas.setCssStyles({ cursor: 'grabbing' });
       this.tgtScale = null;
     }
   }
@@ -434,7 +435,7 @@ class GraphSimulation {
       // Hover: update cursor when not dragging
       const rect = this.canvas.getBoundingClientRect();
       const [wx, wy] = this.toWorld(e.clientX - rect.left, e.clientY - rect.top);
-      this.canvas.style.cursor = this.nodeAt(wx, wy) ? 'grab' : 'default';
+      this.canvas.setCssStyles({ cursor: this.nodeAt(wx, wy) ? 'grab' : 'default' });
       return;
     }
 
@@ -445,7 +446,7 @@ class GraphSimulation {
     if (outside && !this.inGhostMode) {
       this.inGhostMode = true;
       if (this.dragFile) {
-        this.ghostEl = document.body.createEl('div', { cls: 'll-drag-ghost' });
+        this.ghostEl = activeDocument.body.createEl('div', { cls: 'll-drag-ghost' });
         this.ghostEl.setText(`[[${this.dragFile.basename}]]`);
       }
     } else if (!outside && this.inGhostMode) {
@@ -455,8 +456,8 @@ class GraphSimulation {
 
     if (this.inGhostMode) {
       if (this.ghostEl) {
-        this.ghostEl.style.left = e.clientX + 'px';
-        this.ghostEl.style.top  = e.clientY + 'px';
+        this.ghostEl.setCssStyles({ left: e.clientX + 'px' });
+        this.ghostEl.setCssStyles({ top: e.clientY + 'px' });
       }
       this.isHoveringCenter = false;
     } else {
@@ -477,7 +478,7 @@ class GraphSimulation {
   private handlePointerUp(e: PointerEvent) {
     if (this.isPanning) {
       this.isPanning = false;
-      this.canvas.style.cursor = 'default';
+      this.canvas.setCssStyles({ cursor: 'default' });
       return;
     }
     if (!this.dragNode) return;
@@ -485,7 +486,7 @@ class GraphSimulation {
     const moved = (e.clientX - this.dragStartX) ** 2 + (e.clientY - this.dragStartY) ** 2;
     if (this.inGhostMode && this.dragFile) {
       this.ghostEl?.remove(); this.ghostEl = null;
-      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const el = activeDocument.elementFromPoint(e.clientX, e.clientY);
       if (el?.closest('.cm-editor, .cm-content, .CodeMirror, .markdown-source-view')) {
         this.onInsertLink(this.dragFile, el, e.clientX, e.clientY);
       }
@@ -505,7 +506,7 @@ class GraphSimulation {
     this.inGhostMode = false;
     this.isHoveringCenter = false;
     this.ghostEl?.remove(); this.ghostEl = null;
-    this.canvas.style.cursor = 'default';
+    this.canvas.setCssStyles({ cursor: 'default' });
   }
 
   private handleWheel(e: WheelEvent) {
@@ -631,7 +632,7 @@ class GraphSimulation {
 
       // Draw O/outgoing (vertical) / B/backlink (horizontal) marker lines inside node
       if (!n.pinned && (n.isOutgoing || n.isBacklink)) {
-        const bgColor = getComputedStyle(document.body).getPropertyValue('--background-primary').trim() || (this.dark ? '#1e1e1e' : '#ffffff');
+        const bgColor = getComputedStyle(activeDocument.body).getPropertyValue('--background-primary').trim() || (this.dark ? '#1e1e1e' : '#ffffff');
         ctx.strokeStyle = bgColor;
         ctx.lineWidth   = 1.5 / this.scale;
         const arm = r * 0.58;
@@ -873,9 +874,9 @@ class LinkLinkView extends ItemView {
       const btnRow = body.createEl('div', { cls: 'll-reindex-row' });
       const btn = btnRow.createEl('button', { text: 'Index', cls: 'll-action-btn ll-action-btn-accent' });
       const progressWrap = body.createEl('div', { cls: 'll-progress-wrap' });
-      progressWrap.style.display = 'none';
+      progressWrap.setCssStyles({ display: 'none' });
       const progLabel = body.createEl('p', { cls: 'll-prog-label' });
-      progLabel.style.display = 'none';
+      progLabel.setCssStyles({ display: 'none' });
       const bar = progressWrap.createEl('div', { cls: 'll-progress-bar' });
 
       btn.addEventListener('click', async () => {
@@ -907,12 +908,12 @@ class LinkLinkView extends ItemView {
           async () => {
             btn.disabled = true;
             btn.setText('Indexing…');
-            progressWrap.style.display = 'block';
-            progLabel.style.display = 'block';
+            progressWrap.setCssStyles({ display: 'block' });
+            progLabel.setCssStyles({ display: 'block' });
             const { onProgress, onDone, onError } = this.plugin.createProgressDisplay(
               (msg, pct) => {
                 progLabel.setText(msg);
-                bar.style.width = pct + '%';
+                bar.setCssStyles({ width: pct + '%' });
                 bar.classList.toggle('indeterminate', pct === 0);
               }
             );
@@ -920,15 +921,15 @@ class LinkLinkView extends ItemView {
               const { added, updated, removed } = await this.plugin.indexingService.index(onProgress);
               const summary = added + updated === 0
                 ? 'Index is up to date.'
-                : `+${added} new, ${updated} updated, ${removed} removed`;
+                : `+${added} new, ${updated} updated, ${removed} removed`;
               onDone(summary);
               progLabel.setText('Indexing complete!');
-              bar.style.width = '100%';
-              setTimeout(() => this.refresh(), 1500);
+              bar.setCssStyles({ width: '100%' });
+              window.setTimeout(() => this.refresh(), 1500);
             } catch (e) {
               onError();
               progLabel.setText(`Error: ${e instanceof Error ? e.message : String(e)}`);
-              setTimeout(() => this.refresh(), 4000);
+              window.setTimeout(() => this.refresh(), 4000);
             } finally {
               btn.disabled = false;
               btn.setText('Index');
@@ -959,21 +960,21 @@ class LinkLinkView extends ItemView {
       if (score > 0) {
         scoreEl.setText(score.toFixed(2));
         const bg = scoreToColor(score, this.plugin.settings, minScore, maxScore);
-        scoreEl.style.background = bg;
-        scoreEl.style.color      = contrastColor(bg);
+        scoreEl.setCssStyles({ background: bg });
+        scoreEl.setCssStyles({ color: contrastColor(bg) });
       } else {
         scoreEl.setText('?');
         scoreEl.title            = 'Unindexed';
-        scoreEl.style.background = 'var(--background-modifier-border)';
-        scoreEl.style.color      = 'var(--text-muted)';
+        scoreEl.setCssStyles({ background: 'var(--background-modifier-border)' });
+        scoreEl.setCssStyles({ color: 'var(--text-muted)' });
       }
 
       // O (outgoing) always before B (backlink); pre-created for in-place updates
       const badgeO = item.createEl('span', { cls: 'll-ref-badge', text: 'O' });
       const badgeB = item.createEl('span', { cls: 'll-ref-badge', text: 'B' });
       const renderBadges = () => {
-        badgeO.style.display = isOutgoing ? '' : 'none';
-        badgeB.style.display = isBacklink ? '' : 'none';
+        badgeO.setCssStyles({ display: isOutgoing ? '' : 'none' });
+        badgeB.setCssStyles({ display: isBacklink ? '' : 'none' });
       };
       renderBadges();
 
@@ -1062,7 +1063,7 @@ class LinkLinkView extends ItemView {
       });
 
       // ── Click to open, drag to insert [[link]] ───────────────────────────
-      // click handles opens; pointerdown/move/up on document handles drag.
+      // click handles opens; pointerdown/move/up on activeDocument handles drag.
       // Keeping e.preventDefault() off pointerdown so click fires naturally
       // (preventDefault suppresses click in Chromium/Electron).
       // user-select: none on .ll-item prevents text selection instead.
@@ -1086,29 +1087,29 @@ class LinkLinkView extends ItemView {
             isDragging = true;
             wasDragged = true;
             dragGhost?.remove();
-            dragGhost = document.body.createEl('div', { cls: 'll-drag-ghost' });
+            dragGhost = activeDocument.body.createEl('div', { cls: 'll-drag-ghost' });
             dragGhost.setText(`[[${file.basename}]]`);
-            item.style.cursor = 'grabbing';
+            item.setCssStyles({ cursor: 'grabbing' });
           }
           if (dragGhost) {
-            dragGhost.style.left = me.clientX + 'px';
-            dragGhost.style.top  = me.clientY + 'px';
+            dragGhost.setCssStyles({ left: me.clientX + 'px' });
+            dragGhost.setCssStyles({ top: me.clientY + 'px' });
           }
         };
 
         const cleanup = () => {
-          item.style.cursor = '';
+          item.setCssStyles({ cursor: '' });
           dragGhost?.remove(); dragGhost = null;
-          document.removeEventListener('pointermove',   onMove);
-          document.removeEventListener('pointerup',     onUp);
-          document.removeEventListener('pointercancel', onCancel);
+          activeDocument.removeEventListener('pointermove',   onMove);
+          activeDocument.removeEventListener('pointerup',     onUp);
+          activeDocument.removeEventListener('pointercancel', onCancel);
         };
 
         const onUp = (ue: PointerEvent) => {
           if (!isDragging) { cleanup(); return; } // click handler will open file
           const dropX = ue.clientX, dropY = ue.clientY;
           cleanup();
-          const target = document.elementFromPoint(dropX, dropY);
+          const target = activeDocument.elementFromPoint(dropX, dropY);
           if (target?.closest('.cm-editor, .cm-content, .CodeMirror, .markdown-source-view')) {
             this.insertLinkAtDrop(`[[${file.basename}]]`, target, dropX, dropY);
           }
@@ -1116,9 +1117,9 @@ class LinkLinkView extends ItemView {
 
         const onCancel = () => { wasDragged = false; cleanup(); };
 
-        document.addEventListener('pointermove',   onMove);
-        document.addEventListener('pointerup',     onUp);
-        document.addEventListener('pointercancel', onCancel);
+        activeDocument.addEventListener('pointermove',   onMove);
+        activeDocument.addEventListener('pointerup',     onUp);
+        activeDocument.addEventListener('pointercancel', onCancel);
       });
     }
 
@@ -1200,7 +1201,7 @@ class LinkLinkView extends ItemView {
       [settings.colorLow,  `< ${(minS + span / 3).toFixed(2)}`],
     ] as [string, string][]) {
       const item = colorRow.createEl('span', { cls: 'll-legend-item' });
-      item.createEl('span', { cls: 'll-legend-dot' }).style.background = color;
+      item.createEl('span', { cls: 'll-legend-dot' }).setCssStyles({ background: color });
       item.createEl('span', { text: label });
     }
 
@@ -1228,15 +1229,15 @@ function startPhraseRotator(
   const timer = window.setInterval(() => {
     idx = (idx + 1) % phrases.length;
     if (fade) {
-      el.style.opacity = '0';
-      fadeTimer = window.setTimeout(() => { fadeTimer = null; el.setText(phrases[idx]); el.style.opacity = '1'; }, 220);
+      el.setCssStyles({ opacity: '0' });
+      fadeTimer = window.setTimeout(() => { fadeTimer = null; el.setText(phrases[idx]); el.setCssStyles({ opacity: '1' }); }, 220);
     } else {
       el.setText(phrases[idx]);
     }
   }, intervalMs);
   return () => {
-    clearInterval(timer);
-    if (fadeTimer !== null) { clearTimeout(fadeTimer); fadeTimer = null; el.style.opacity = '1'; }
+    window.clearInterval(timer);
+    if (fadeTimer !== null) { window.clearTimeout(fadeTimer); fadeTimer = null; el.setCssStyles({ opacity: '1' }); }
   };
 }
 
@@ -1312,7 +1313,7 @@ class IndexProgressPopup {
   isFinished = false;
 
   constructor() {
-    this.el = document.body.createEl('div', { cls: 'll-idx-popup' });
+    this.el = activeDocument.body.createEl('div', { cls: 'll-idx-popup' });
 
     const header = this.el.createEl('div', { cls: 'll-idx-popup-header' });
     this.titleEl = header.createEl('span', { text: 'Link Link! — Indexing', cls: 'll-idx-popup-title' });
@@ -1336,7 +1337,7 @@ class IndexProgressPopup {
   update(msg: string, pct: number) {
     this.titleEl.setText(pct > 0 ? `Link Link! — Indexing: ${Math.round(pct)}%` : 'Link Link! — Indexing');
     this.statusEl.setText(msg);
-    this.barEl.style.width = pct + '%';
+    this.barEl.setCssStyles({ width: pct + '%' });
     this.barEl.classList.toggle('indeterminate', pct === 0);
   }
 
@@ -1344,12 +1345,12 @@ class IndexProgressPopup {
     this.isFinished = true;
     this.stopPhrases?.(); this.stopPhrases = null;
     this.titleEl.setText('Link Link! ✓');
-    this.phraseEl.style.opacity = '1';
+    this.phraseEl.setCssStyles({ opacity: '1' });
     this.phraseEl.setText('Done!');
     this.barEl.classList.remove('indeterminate');
-    this.barEl.style.width = '100%';
+    this.barEl.setCssStyles({ width: '100%' });
     this.statusEl.setText(summary);
-    if (timeoutSec > 0) setTimeout(() => this.close(), timeoutSec * 1000);
+    if (timeoutSec > 0) window.setTimeout(() => this.close(), timeoutSec * 1000);
   }
 
   close() {
@@ -1406,11 +1407,11 @@ export default class LinkLinkPlugin extends Plugin {
           secondary?.(msg, pct);
         },
         onDone: (summary) => {
-          clearInterval(phraseTimer);
+          window.clearInterval(phraseTimer);
           notice.setMessage(`Link Link! ✓  ${summary}`);
-          if (t > 0) setTimeout(() => notice.hide(), t * 1000);
+          if (t > 0) window.setTimeout(() => notice.hide(), t * 1000);
         },
-        onError: () => { clearInterval(phraseTimer); notice.hide(); },
+        onError: () => { window.clearInterval(phraseTimer); notice.hide(); },
       };
     } else {
       return {
@@ -1427,7 +1428,7 @@ export default class LinkLinkPlugin extends Plugin {
     this.interlinkService = new InterlinkService(this.app, this);
     this.registerView(VIEW_TYPE, (leaf) => new LinkLinkView(leaf, this));
     this.addRibbonIcon('link', 'Link Link!', () => this.activateView());
-    this.addCommand({ id: 'open-link-link', name: 'Open related notes panel', callback: () => this.activateView() });
+    this.addCommand({ id: 'open', name: 'Open related notes panel', callback: () => this.activateView() });
 
     this.addCommand({
       id: 'index-vault',
@@ -1446,7 +1447,7 @@ export default class LinkLinkPlugin extends Plugin {
           const { added, updated, removed } = await this.indexingService.index(onProgress);
           const summary = added + updated === 0
             ? 'Index is up to date.'
-            : `+${added} new, ${updated} updated, ${removed} removed`;
+            : `+${added} new, ${updated} updated, ${removed} removed`;
           onDone(summary);
           this.refreshView();
         } catch (e) {
@@ -1508,7 +1509,7 @@ export default class LinkLinkPlugin extends Plugin {
       this.settings.wizardShown = true;
       await this.saveSettings();
       this.app.workspace.onLayoutReady(() =>
-        setTimeout(() => new SetupWizardModal(this.app, this).open(), 600)
+        window.setTimeout(() => new SetupWizardModal(this.app, this).open(), 600)
       );
     }
 
@@ -1534,15 +1535,15 @@ export default class LinkLinkPlugin extends Plugin {
 
     // Auto-index on file save — debounced to batch rapid saves and absorb
     // Linter's second write, eliminating race conditions on the index file.
-    let fileSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    let fileSaveTimer: number | null = null;
     const pendingFiles = new Set<TFile>();
     this.registerEvent(this.app.vault.on('modify', (file) => {
       if (!(file instanceof TFile) || file.extension !== 'md') return;
       if (this.settings.autoIndexMode !== 'file-save') return;
       if (this.settings.embeddingSource === 'existing') return;
       pendingFiles.add(file);
-      if (fileSaveTimer) clearTimeout(fileSaveTimer);
-      fileSaveTimer = setTimeout(() => {
+      if (fileSaveTimer) window.clearTimeout(fileSaveTimer);
+      fileSaveTimer = window.setTimeout(() => {
         fileSaveTimer = null;
         const batch = [...pendingFiles];
         pendingFiles.clear();
@@ -1567,13 +1568,13 @@ export default class LinkLinkPlugin extends Plugin {
       this.activateView();
       // Auto-index on startup (delayed to not block Obsidian loading)
       if (this.settings.autoIndexMode === 'startup' && this.settings.embeddingSource !== 'existing') {
-        setTimeout(() => {
+        window.setTimeout(() => {
           const { onProgress, onDone, onError } = this.createProgressDisplay();
           this.indexingService.index(onProgress)
             .then(({ added, updated, removed }) => {
               const summary = added + updated === 0
                 ? 'Index is up to date.'
-                : `+${added} new, ${updated} updated, ${removed} removed`;
+                : `+${added} new, ${updated} updated, ${removed} removed`;
               onDone(summary);
               this.refreshView();
             })
@@ -1647,7 +1648,7 @@ export default class LinkLinkPlugin extends Plugin {
   async scanForIndexFiles(): Promise<{ path: string; format: string }[]> {
     const adapter = this.app.vault.adapter;
     // @ts-ignore
-    const listed = await adapter.list('.obsidian');
+    const listed = await adapter.list(this.app.vault.configDir);
     const results: { path: string; format: string }[] = [];
     for (const filePath of listed.files as string[]) {
       if (!filePath.endsWith('.json')) continue;
@@ -1904,48 +1905,6 @@ function filterSection(
   });
 }
 
-// ─── Chip input ──────────────────────────────────────────────────────────────
-
-function chipField(
-  parent: HTMLElement,
-  values: string[],
-  placeholder: string,
-  onChange: (v: string[]) => Promise<void>
-) {
-  const wrap = parent.createEl('div', { cls: 'll-chip-field' });
-  const render = () => {
-    wrap.empty();
-    for (const v of values) {
-      const chip = wrap.createEl('span', { cls: 'll-chip' });
-      chip.createEl('span', { text: v, cls: 'll-chip-text' });
-      const x = chip.createEl('button', { cls: 'll-chip-x', text: '×' });
-      x.addEventListener('click', async () => {
-        values.splice(values.indexOf(v), 1);
-        await onChange([...values]);
-        render();
-      });
-    }
-    const add = wrap.createEl('button', { cls: 'll-chip-add', text: '+ Add' });
-    add.addEventListener('click', () => {
-      add.remove();
-      const inp = wrap.createEl('input', { cls: 'll-chip-input' });
-      inp.placeholder = placeholder;
-      const commit = async () => {
-        const val = inp.value.trim();
-        if (val && !values.includes(val)) { values.push(val); await onChange([...values]); }
-        render();
-      };
-      inp.addEventListener('keydown', async (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); await commit(); }
-        if (e.key === 'Escape') render();
-      });
-      inp.addEventListener('blur', commit);
-      inp.focus();
-    });
-  };
-  render();
-}
-
 // ─── Ollama model modal ───────────────────────────────────────────────────────
 
 class OllamaModelModal extends Modal {
@@ -1979,7 +1938,7 @@ class OllamaModelModal extends Modal {
     nameInput.placeholder = 'Enter exact model name (e.g. bge-m3)';
     nameInput.value = this.existing?.modelName ?? '';
     const nameErr = nameField.createEl('p', { cls: 'll-modal-error' });
-    nameErr.style.display = 'none';
+    nameErr.setCssStyles({ display: 'none' });
 
     const dispField = makeField('Display name', false);
     const dispInput = dispField.createEl('input', { type: 'text', cls: 'll-modal-input' });
@@ -2004,11 +1963,11 @@ class OllamaModelModal extends Modal {
       const mn = nameInput.value.trim();
       if (!mn) {
         nameErr.setText('Model name is required.');
-        nameErr.style.display = 'block';
+        nameErr.setCssStyles({ display: 'block' });
         nameInput.focus();
         return;
       }
-      nameErr.style.display = 'none';
+      nameErr.setCssStyles({ display: 'none' });
       this.onSave(mn, dispInput.value.trim(), urlInput.value.trim());
       this.close();
     };
@@ -2016,7 +1975,7 @@ class OllamaModelModal extends Modal {
     saveBtn.addEventListener('click', doSave);
     nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSave(); });
 
-    setTimeout(() => nameInput.focus(), 50);
+    window.setTimeout(() => nameInput.focus(), 50);
   }
 
   onClose() { this.contentEl.empty(); }
@@ -2100,7 +2059,7 @@ class SetupWizardModal extends Modal {
   private renderWelcome(body: HTMLElement) {
     body.createEl('div', { text: 'Welcome to Link Link!', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Link Link! finds semantically related notes in your vault using embeddings — a compact numerical representation of what each note means.',
+      text: 'Link Link! finds semantically related notes in your vault using embeddings — a compact numerical representation of what each note means.',
       cls: 'll-wiz-desc',
     });
     body.createEl('p', {
@@ -2108,7 +2067,7 @@ class SetupWizardModal extends Modal {
       cls: 'll-wiz-desc',
     });
     body.createEl('p', { cls: 'll-wiz-desc ll-wiz-two-min' })
-      .createEl('strong', { text: 'Takes about two minutes.' });
+      .createEl('strong', { text: 'Takes about two minutes.' });
     const row = this.mkFooter(body);
     const next = row.createEl('button', { text: 'Get Started →', cls: 'll-action-btn ll-action-btn-accent' });
     next.addEventListener('click', () => this.goTo(1));
@@ -2119,9 +2078,9 @@ class SetupWizardModal extends Modal {
     body.createEl('div', { text: 'Choose embedding model', cls: 'll-wiz-title' });
 
     const MODELS: { id: 'builtin' | 'local' | 'existing'; label: string; desc: string; req: string }[] = [
-      { id: 'builtin',  label: 'Built-in (lightweight)', desc: 'A compact model shipped with the plugin. No setup required, runs fully offline.', req: 'No requirements' },
-      { id: 'local',    label: 'Local model (Ollama)',   desc: 'Use a locally-running Ollama server for more powerful models and full control.',    req: 'Requires Ollama installed and running' },
-      { id: 'existing', label: 'Existing index file',    desc: 'Reuse an embedding index already in your vault (e.g. from the Copilot plugin).',   req: 'Another plugin must have already indexed your vault' },
+      { id: 'builtin',  label: 'Built-in (lightweight)', desc: 'A compact model shipped with the plugin. No setup required, runs fully offline.', req: 'No requirements' },
+      { id: 'local',    label: 'Local model (Ollama)',   desc: 'Use a locally-running Ollama server for more powerful models and full control.',    req: 'Requires Ollama installed and running' },
+      { id: 'existing', label: 'Existing index file',    desc: 'Reuse an embedding index already in your vault (e.g. from the Copilot plugin).',   req: 'Another plugin must have already indexed your vault' },
     ];
 
     let selected = this.chosenModel;
@@ -2129,12 +2088,12 @@ class SetupWizardModal extends Modal {
 
     // Ollama inline form
     const ollamaWrap = body.createEl('div', { cls: 'll-wiz-ollama-wrap' });
-    ollamaWrap.style.display = selected === 'local' ? '' : 'none';
+    ollamaWrap.setCssStyles({ display: selected === 'local' ? '' : 'none' });
     const nameInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
     nameInput.placeholder = 'Model name (e.g. bge-m3)';
     nameInput.value = this.wzOllamaName;
     const nameErr = ollamaWrap.createEl('p', { cls: 'll-modal-error' });
-    nameErr.style.display = 'none';
+    nameErr.setCssStyles({ display: 'none' });
     const dispInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
     dispInput.placeholder = 'Display name (optional)';
     dispInput.value = this.wzOllamaDisplay;
@@ -2159,15 +2118,15 @@ class SetupWizardModal extends Modal {
 
     checkBtn.addEventListener('click', async () => {
       const mn = nameInput.value.trim();
-      if (!mn) { nameErr.setText('Model name is required.'); nameErr.style.display = 'block'; return; }
-      nameErr.style.display = 'none';
+      if (!mn) { nameErr.setText('Model name is required.'); nameErr.setCssStyles({ display: 'block' }); return; }
+      nameErr.setCssStyles({ display: 'none' });
       checkBtn.disabled = true; checkBtn.setText('Checking…');
       connBadge.className = 'll-wiz-conn-badge'; connBadge.setText('');
       try {
         const base = (urlInput.value.trim() || 'http://localhost:11434').replace(/\/$/, '');
-        const resp = await fetch(`${base}/api/tags`);
-        if (!resp.ok) throw new Error();
-        const data = await resp.json() as { models?: { name: string }[] };
+        const resp = await requestUrl(`${base}/api/tags`);
+        if (resp.status !== 200) throw new Error();
+        const data = resp.json as { models?: { name: string }[] };
         const found = (data.models ?? []).some(m => m.name === mn || m.name.startsWith(mn + ':'));
         connBadge.setText(found ? '✓ Reachable' : '! Model not found on server');
         connBadge.addClass(found ? 'll-wiz-conn-ok' : 'll-wiz-conn-warn');
@@ -2180,8 +2139,8 @@ class SetupWizardModal extends Modal {
     nextBtn.addEventListener('click', async () => {
       if (selected === 'local') {
         const mn = nameInput.value.trim();
-        if (!mn) { nameErr.setText('Model name is required.'); nameErr.style.display = 'block'; nameInput.focus(); return; }
-        nameErr.style.display = 'none';
+        if (!mn) { nameErr.setText('Model name is required.'); nameErr.setCssStyles({ display: 'block' }); nameInput.focus(); return; }
+        nameErr.setCssStyles({ display: 'none' });
         if (this.wzOllamaId) {
           const m = this.S.ollamaModels.find(m => m.id === this.wzOllamaId);
           if (m) { m.modelName = mn; m.displayName = dispInput.value.trim(); m.baseUrl = urlInput.value.trim(); }
@@ -2208,7 +2167,7 @@ class SetupWizardModal extends Modal {
         cards.querySelectorAll('.ll-wiz-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
         selected = m.id;
-        ollamaWrap.style.display = m.id === 'local' ? '' : 'none';
+        ollamaWrap.setCssStyles({ display: m.id === 'local' ? '' : 'none' });
         updateNext();
       });
     }
@@ -2218,7 +2177,7 @@ class SetupWizardModal extends Modal {
   private renderTargeting(body: HTMLElement) {
     body.createEl('div', { text: 'Indexing scope', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Indexing reads each note and creates a compact semantic fingerprint — everything runs locally, nothing leaves your machine.',
+      text: 'Indexing reads each note and creates a compact semantic fingerprint — everything runs locally, nothing leaves your machine.',
       cls: 'll-wiz-desc',
     });
     body.createEl('p', {
@@ -2269,7 +2228,7 @@ class SetupWizardModal extends Modal {
   private renderIndexFile(body: HTMLElement) {
     body.createEl('div', { text: 'Select index file', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Link Link! will read an existing embedding index from inside your vault. Select the file below, or enter its path manually.',
+      text: 'Link Link! will read an existing embedding index from inside your vault. Select the file below, or enter its path manually.',
       cls: 'll-wiz-desc',
     });
 
@@ -2303,22 +2262,22 @@ class SetupWizardModal extends Modal {
         });
       }
       if (S.existingIndexPath) {
-        readyNote.style.display = '';
-        readyNote.setText(`✓ Index file ready — no additional indexing needed.`);
+        readyNote.setCssStyles({ display: '' });
+        readyNote.setText(`✓ Index file ready — no additional indexing needed.`);
       }
     };
 
     const readyNote = body.createEl('p', { cls: 'll-wiz-ready-note' });
-    readyNote.style.display = S.existingIndexPath ? '' : 'none';
-    if (S.existingIndexPath) readyNote.setText('✓ Index file ready — no additional indexing needed.');
+    readyNote.setCssStyles({ display: S.existingIndexPath ? '' : 'none' });
+    if (S.existingIndexPath) readyNote.setText('✓ Index file ready — no additional indexing needed.');
 
     new Setting(body).setName('Index file path').addText(t => {
       t.setPlaceholder('.obsidian/<path-to-your-index-file>').setValue(S.existingIndexPath)
        .onChange(async v => {
          S.existingIndexPath = v;
          detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
-         readyNote.style.display = v.trim() ? '' : 'none';
-         if (v.trim()) readyNote.setText('✓ Index file ready — no additional indexing needed.');
+         readyNote.setCssStyles({ display: v.trim() ? '' : 'none' });
+         if (v.trim()) readyNote.setText('✓ Index file ready — no additional indexing needed.');
          updateNext(); await this.save();
        });
       pathInput = t.inputEl as HTMLInputElement;
@@ -2346,17 +2305,17 @@ class SetupWizardModal extends Modal {
   private renderIndex(body: HTMLElement) {
     body.createEl('div', { text: 'Index your vault', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Indexing reads each note and builds a compact semantic fingerprint stored in a separate file — your notes are never modified. Everything runs locally, nothing leaves your machine.',
+      text: 'Indexing reads each note and builds a compact semantic fingerprint stored in a separate file — your notes are never modified. Everything runs locally, nothing leaves your machine.',
       cls: 'll-wiz-desc',
     });
 
     const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' });
-    progressWrap.style.display = 'none';
+    progressWrap.setCssStyles({ display: 'none' });
     const pctEl    = progressWrap.createEl('p', { cls: 'll-prog-pct' });
     const phraseEl = progressWrap.createEl('p', { cls: 'll-prog-phrase' });
     const progLabel = progressWrap.createEl('p', { cls: 'll-prog-label' });
     const bar = progressWrap.createEl('div', { cls: 'll-progress-wrap' }).createEl('div', { cls: 'll-progress-bar' });
-    const doneNote = body.createEl('p', { cls: 'll-wiz-ready-note' }); doneNote.style.display = 'none';
+    const doneNote = body.createEl('p', { cls: 'll-wiz-ready-note' }); doneNote.setCssStyles({ display: 'none' });
 
     const idxBtn = body.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
     setIcon(idxBtn.createEl('span', { cls: 'll-btn-icon' }), 'database');
@@ -2381,7 +2340,7 @@ class SetupWizardModal extends Modal {
 
     idxBtn.addEventListener('click', async () => {
       idxBtn.disabled = true; skipBtn.disabled = true;
-      progressWrap.style.display = '';
+      progressWrap.setCssStyles({ display: '' });
       isIndexing = true;
       controller = new AbortController();
 
@@ -2389,20 +2348,20 @@ class SetupWizardModal extends Modal {
 
       try {
         const { added, updated, removed } = await this.plugin.indexingService.index(
-          (msg, pct) => { progLabel.setText(msg); bar.style.width = `${pct}%`; pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : ''); },
+          (msg, pct) => { progLabel.setText(msg); bar.setCssStyles({ width: `${pct}%` }); pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : ''); },
           undefined,
           controller.signal
         );
         stopPhrases?.(); stopPhrases = null;
-        progressWrap.style.display = 'none';
-        doneNote.style.display = '';
-        doneNote.setText(`✓ Done — ${added + updated} notes indexed${removed ? `, ${removed} removed` : ''}.`);
-        skipBtn.style.display = 'none';
+        progressWrap.setCssStyles({ display: 'none' });
+        doneNote.setCssStyles({ display: '' });
+        doneNote.setText(`✓ Done — ${added + updated} notes indexed${removed ? `, ${removed} removed` : ''}.`);
+        skipBtn.setCssStyles({ display: 'none' });
         const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
         nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
       } catch (e) {
         stopPhrases?.(); stopPhrases = null;
-        progressWrap.style.display = 'none';
+        progressWrap.setCssStyles({ display: 'none' });
         if (e instanceof DOMException && e.name === 'AbortError') return;
         body.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
         idxBtn.disabled = false; skipBtn.disabled = false;
@@ -2416,7 +2375,7 @@ class SetupWizardModal extends Modal {
   private renderInterlink(body: HTMLElement) {
     body.createEl('div', { text: 'Interlink your vault', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Interlink command writes your top related notes into each note\'s frontmatter as [[links]], making connections visible in Graph View. Only the dedicated frontmatter field is modified. Your other content stays intact.',
+      text: 'Interlink command writes your top related notes into each note\'s frontmatter as [[links]], making connections visible in Graph View. Only the dedicated frontmatter field is modified. Your other content stays intact.',
       cls: 'll-wiz-desc',
     });
 
@@ -2431,34 +2390,33 @@ class SetupWizardModal extends Modal {
     const choiceWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-choice' });
     const fieldInputWrap = fieldSection.createEl('div', { cls: 'll-wiz-field-input-wrap' });
     const fieldInput     = fieldInputWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
-    const fieldErr       = fieldInputWrap.createEl('p', { cls: 'll-modal-error' }); fieldErr.style.display = 'none';
-    const fieldDesc      = fieldInputWrap.createEl('p', { cls: 'll-modal-hint' }); fieldDesc.style.display = 'none';
-    const statusNote     = fieldSection.createEl('p', { cls: 'll-modal-hint' }); statusNote.style.display = 'none';
+    const fieldErr       = fieldInputWrap.createEl('p', { cls: 'll-modal-error' }); fieldErr.setCssStyles({ display: 'none' });
+    const fieldDesc      = fieldInputWrap.createEl('p', { cls: 'll-modal-hint' }); fieldDesc.setCssStyles({ display: 'none' });
+    const statusNote     = fieldSection.createEl('p', { cls: 'll-modal-hint' }); statusNote.setCssStyles({ display: 'none' });
     let lastValidField        = S.relatedFieldName;
     let fieldReady            = false;
-    let useReplaceMode        = false;
     let createNewFieldDefault = '';
-    const fieldConfirmRow = fieldSection.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.style.display = 'none';
+    const fieldConfirmRow = fieldSection.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
     fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
-      fieldInput.value = lastValidField; fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+      fieldInput.value = lastValidField; fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
     });
     fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', async () => {
       const pending = fieldConfirmRow.dataset['pending'] ?? '';
       lastValidField = pending; S.relatedFieldName = pending; await this.save();
-      fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+      fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       statusNote.setText('Will use \u201c' + (pending || 'related') + ':\u201d frontmatter field when interlinking.');
-      statusNote.style.display = '';
+      statusNote.setCssStyles({ display: '' });
       setFieldReady(true);
     });
 
     // Interlink action area
     body.createEl('div', { cls: 'll-section-sep' });
-    const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' }); progressWrap.style.display = 'none';
+    const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' }); progressWrap.setCssStyles({ display: 'none' });
     const pctEl    = progressWrap.createEl('p', { cls: 'll-prog-pct' });
     const phraseEl = progressWrap.createEl('p', { cls: 'll-prog-phrase' });
     const progLabel = progressWrap.createEl('p', { cls: 'll-prog-label' });
     const bar = progressWrap.createEl('div', { cls: 'll-progress-wrap' }).createEl('div', { cls: 'll-progress-bar' });
-    const doneWrap = body.createEl('div', { cls: 'll-wiz-done-wrap' }); doneWrap.style.display = 'none';
+    const doneWrap = body.createEl('div', { cls: 'll-wiz-done-wrap' }); doneWrap.setCssStyles({ display: 'none' });
 
     const ilBtn = body.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
     setIcon(ilBtn.createEl('span', { cls: 'll-btn-icon' }), 'git-branch');
@@ -2494,51 +2452,51 @@ class SetupWizardModal extends Modal {
 
     fieldInput.addEventListener('input', () => {
       const err = validateFmFieldName(fieldInput.value.trim());
-      fieldErr.style.display = err ? 'block' : 'none';
+      fieldErr.setCssStyles({ display: err ? 'block' : 'none' });
       if (err) fieldErr.setText(err);
-      if (fieldInput.value.trim()) fieldDesc.style.display = 'none';
+      if (fieldInput.value.trim()) fieldDesc.setCssStyles({ display: 'none' });
     });
     fieldInput.addEventListener('blur', async () => {
       const v = fieldInput.value.trim();
       const err = validateFmFieldName(v);
-      if (err) { fieldInput.value = lastValidField; fieldErr.style.display = 'none'; return; }
+      if (err) { fieldInput.value = lastValidField; fieldErr.setCssStyles({ display: 'none' }); return; }
       const effectiveName = v || createNewFieldDefault;
-      if (!v && effectiveName) { fieldInput.value = effectiveName; fieldDesc.style.display = 'none'; }
+      if (!v && effectiveName) { fieldInput.value = effectiveName; fieldDesc.setCssStyles({ display: 'none' }); }
       const displayName = effectiveName || 'related';
       const { atRisk, safe } = classifyField(displayName);
       const total = atRisk + safe;
       fieldErr.removeClass('ll-field-ok');
       if (total === 0) {
         // No notes — good
-        fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+        fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
         fieldErr.setText('Good \u2014 no notes with \u201c' + displayName + ':\u201d found. It will be used when interlinking.');
-        fieldErr.addClass('ll-field-ok'); fieldErr.style.display = 'block';
-        statusNote.style.display = 'none';
+        fieldErr.addClass('ll-field-ok'); fieldErr.setCssStyles({ display: 'block' });
+        statusNote.setCssStyles({ display: 'none' });
         lastValidField = effectiveName; S.relatedFieldName = effectiveName; await this.save();
         setFieldReady(true);
       } else if (atRisk === 0) {
         // All in exceptions — safe
-        fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
-        fieldErr.setText('Good \u2014 ' + safe + ' note' + (safe > 1 ? 's' : '') + ' have \u201c' + displayName + ':\u201d but all are excluded by your rules \u2014 safe to proceed.');
-        fieldErr.addClass('ll-field-ok'); fieldErr.style.display = 'block';
-        statusNote.style.display = 'none';
+        fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
+        fieldErr.setText('Good \u2014 ' + safe + ' note' + (safe > 1 ? 's' : '') + ' have \u201c' + displayName + ':\u201d but all are excluded by your rules \u2014 safe to proceed.');
+        fieldErr.addClass('ll-field-ok'); fieldErr.setCssStyles({ display: 'block' });
+        statusNote.setCssStyles({ display: 'none' });
         lastValidField = effectiveName; S.relatedFieldName = effectiveName; await this.save();
         setFieldReady(true);
       } else if (safe > 0) {
         // Mixed — show split count + confirm
-        fieldErr.setText(atRisk + ' of ' + total + ' note' + (total > 1 ? 's' : '') + ' with \u201c' + displayName + ':\u201d will be overwritten (' + safe + ' excluded by rules, safe). Continue?');
-        fieldErr.style.display = 'block';
-        statusNote.style.display = 'none';
-        fieldConfirmRow.style.display = 'flex';
+        fieldErr.setText(atRisk + ' of ' + total + ' note' + (total > 1 ? 's' : '') + ' with \u201c' + displayName + ':\u201d will be overwritten (' + safe + ' excluded by rules, safe). Continue?');
+        fieldErr.setCssStyles({ display: 'block' });
+        statusNote.setCssStyles({ display: 'none' });
+        fieldConfirmRow.setCssStyles({ display: 'flex' });
         fieldConfirmRow.dataset['pending'] = effectiveName;
         setFieldReady(false);
         return;
       } else {
         // All at risk
-        fieldErr.setText(total + ' note' + (total > 1 ? 's' : '') + ' with \u201c' + displayName + ':\u201d found. Content will be overwritten on interlink.');
-        fieldErr.style.display = 'block';
-        statusNote.style.display = 'none';
-        fieldConfirmRow.style.display = 'flex';
+        fieldErr.setText(total + ' note' + (total > 1 ? 's' : '') + ' with \u201c' + displayName + ':\u201d found. Content will be overwritten on interlink.');
+        fieldErr.setCssStyles({ display: 'block' });
+        statusNote.setCssStyles({ display: 'none' });
+        fieldConfirmRow.setCssStyles({ display: 'flex' });
         fieldConfirmRow.dataset['pending'] = effectiveName;
         setFieldReady(false);
         return;
@@ -2561,19 +2519,18 @@ class SetupWizardModal extends Modal {
       const addChoiceButtons = () => {
         const useBtn = choiceWrap.createEl('button', { text: 'Use it anyways', cls: 'll-action-btn ll-action-btn-pink' });
         const newBtn = choiceWrap.createEl('button', { text: 'Create new field', cls: 'll-action-btn ll-action-btn-accent' });
-        fieldInputWrap.style.display = 'none';
+        fieldInputWrap.setCssStyles({ display: 'none' });
 
         useBtn.addEventListener('click', () => {
           new ConfirmModal(this.app,
             'You have notes with existing frontmatter named \u2018related\u2019.',
             'If you use it with this plugin it will be rewritten and all current content in this field will be lost. This cannot be easily undone.',
             () => {
-              useReplaceMode = true;
-              fieldInputWrap.style.display = 'none';
-              fieldDesc.style.display = 'none';
-              fieldErr.style.display = 'none';
+              fieldInputWrap.setCssStyles({ display: 'none' });
+              fieldDesc.setCssStyles({ display: 'none' });
+              fieldErr.setCssStyles({ display: 'none' });
               statusNote.setText('Will use “' + (S.relatedFieldName || 'related') + ':” frontmatter field when interlinking.');
-              statusNote.style.display = '';
+              statusNote.setCssStyles({ display: '' });
               setFieldReady(true);
             },
             'I understand. Rewrite.', true
@@ -2581,32 +2538,32 @@ class SetupWizardModal extends Modal {
         });
 
         newBtn.addEventListener('click', () => {
-          fieldInputWrap.style.display = '';
+          fieldInputWrap.setCssStyles({ display: '' });
           S.relatedFieldName = ''; lastValidField = '';
           createNewFieldDefault = !connectedCount ? 'connected' : '';
           fieldInput.placeholder = !connectedCount ? 'connected' : 'my-field';
           fieldInput.value = '';
-          if (!connectedCount) { fieldDesc.setText("Leave empty to use 'connected'"); fieldDesc.style.display = ''; }
+          if (!connectedCount) { fieldDesc.setText("Leave empty to use 'connected'"); fieldDesc.setCssStyles({ display: '' }); }
           fieldInput.focus();
-          statusNote.style.display = 'none';
-          fieldErr.style.display = 'none';
+          statusNote.setCssStyles({ display: 'none' });
+          fieldErr.setCssStyles({ display: 'none' });
           setFieldReady(false);
         });
       };
 
       if (hasCustomField) {
         // User already resolved the conflict — restore custom field state, no warning
-        fieldInputWrap.style.display = '';
+        fieldInputWrap.setCssStyles({ display: '' });
         fieldInput.value = S.relatedFieldName;
         lastValidField = S.relatedFieldName;
         createNewFieldDefault = !connectedCount ? 'connected' : '';
         fieldInput.placeholder = !connectedCount ? 'connected' : 'my-field';
         statusNote.setText('Will use \u201c' + S.relatedFieldName + ':\u201d frontmatter field when interlinking.');
-        statusNote.style.display = '';
+        statusNote.setCssStyles({ display: '' });
         setFieldReady(true);
       } else if (relatedCount === 0) {
         // No conflict — show input directly
-        fieldInputWrap.style.display = '';
+        fieldInputWrap.setCssStyles({ display: '' });
         fieldInput.placeholder = !connectedCount ? 'connected' : 'related';
         fieldInput.value = S.relatedFieldName;
         lastValidField = S.relatedFieldName;
@@ -2614,34 +2571,34 @@ class SetupWizardModal extends Modal {
       } else if (relatedAtRisk === 0) {
         // All 'related:' notes are in exceptions — safe to proceed with default field
         statusWrap.createEl('p', {
-          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' have a "related:" field, but all are excluded from interlinking by your exception rules \u2014 safe to proceed.',
+          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' have a "related:" field, but all are excluded from interlinking by your exception rules \u2014 safe to proceed.',
           cls: 'll-wiz-warn-safe',
         });
         const newBtn = choiceWrap.createEl('button', { text: 'Create new field', cls: 'll-action-btn ll-action-btn-secondary' });
         newBtn.addEventListener('click', () => {
-          fieldInputWrap.style.display = '';
+          fieldInputWrap.setCssStyles({ display: '' });
           S.relatedFieldName = ''; lastValidField = '';
           createNewFieldDefault = !connectedCount ? 'connected' : '';
           fieldInput.placeholder = !connectedCount ? 'connected' : 'my-field';
           fieldInput.value = '';
-          if (!connectedCount) { fieldDesc.setText("Leave empty to use 'connected'"); fieldDesc.style.display = ''; }
+          if (!connectedCount) { fieldDesc.setText("Leave empty to use 'connected'"); fieldDesc.setCssStyles({ display: '' }); }
           fieldInput.focus();
-          statusNote.style.display = 'none';
+          statusNote.setCssStyles({ display: 'none' });
           setFieldReady(false);
         });
-        fieldInputWrap.style.display = 'none';
+        fieldInputWrap.setCssStyles({ display: 'none' });
         setFieldReady(true); // safe with default 'related'
       } else if (relatedSafe > 0) {
         // Mixed — some at risk, some safe
         statusWrap.createEl('p', {
-          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' have a "related:" field — ' + relatedSafe + ' excluded by your rules (won\u2019t be affected), ' + relatedAtRisk + ' will be overwritten on interlink.',
+          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' have a "related:" field — ' + relatedSafe + ' excluded by your rules (won\u2019t be affected), ' + relatedAtRisk + ' will be overwritten on interlink.',
           cls: 'll-wiz-warn-mixed',
         });
         addChoiceButtons();
       } else {
         // All at risk
         statusWrap.createEl('p', {
-          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' already have a "related:" field.',
+          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' already have a "related:" field.',
           cls: 'll-modal-error',
         });
         addChoiceButtons();
@@ -2650,28 +2607,28 @@ class SetupWizardModal extends Modal {
 
     // ── Interlink Vault run ─────────────────────────────────────────────
     const runInterlink = async () => {
-      ilBtn.disabled = true; skipBtn.disabled = true; progressWrap.style.display = '';
+      ilBtn.disabled = true; skipBtn.disabled = true; progressWrap.setCssStyles({ display: '' });
       const stopPhrases = startPhraseRotator(phraseEl, INTERLINK_PHRASES, 3000);
       try {
         const index = await this.plugin.loadAnyIndex();
         const { updated } = await this.plugin.interlinkService.run(index, (msg, pct) => {
-          progLabel.setText(msg); bar.style.width = pct + '%';
+          progLabel.setText(msg); bar.setCssStyles({ width: pct + '%' });
           pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : '');
         });
         stopPhrases();
-        progressWrap.style.display = 'none'; doneWrap.style.display = '';
-        doneWrap.createEl('p', { text: '✓ ' + updated + ' notes connected.', cls: 'll-wiz-ready-note' });
+        progressWrap.setCssStyles({ display: 'none' }); doneWrap.setCssStyles({ display: '' });
+        doneWrap.createEl('p', { text: '✓ ' + updated + ' notes connected.', cls: 'll-wiz-ready-note' });
         const graphRow = doneWrap.createEl('div', { cls: 'll-wiz-graph-row' });
-        graphRow.createEl('span', { text: 'Open Graph View to see your vault\'s new connected state.', cls: 'll-wiz-done-desc' });
+        graphRow.createEl('span', { text: 'Open Graph View to see your vault\'s new connected state.', cls: 'll-wiz-done-desc' });
         const graphBtn = graphRow.createEl('button', { text: 'Open Graph View', cls: 'll-action-btn ll-action-btn-secondary' });
         // @ts-ignore
         graphBtn.addEventListener('click', () => this.app.commands.executeCommandById('graph:open'));
-        skipBtn.style.display = 'none';
+        skipBtn.setCssStyles({ display: 'none' });
         const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
         nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
       } catch (e) {
         stopPhrases();
-        progressWrap.style.display = 'none';
+        progressWrap.setCssStyles({ display: 'none' });
         body.createEl('p', { text: 'Error: ' + (e instanceof Error ? e.message : String(e)), cls: 'll-error' });
         ilBtn.disabled = !fieldReady; skipBtn.disabled = false;
       }
@@ -2692,9 +2649,9 @@ class SetupWizardModal extends Modal {
   // ── Done ─────────────────────────────────────────────────────────────────
   private renderDone(body: HTMLElement) {
     body.createEl('div', { text: 'You\'re all set!', cls: 'll-wiz-title' });
-    body.createEl('p', { text: 'Link Link! is ready to go. Open the related notes panel to start exploring connections.', cls: 'll-wiz-desc' });
+    body.createEl('p', { text: 'Link Link! is ready to go. Open the related notes panel to start exploring connections.', cls: 'll-wiz-desc' });
     body.createEl('p', {
-      text: 'Open Settings → Link Link! to fine-tune thresholds, Top N, display options, and more.',
+      text: 'Open Settings → Link Link! to fine-tune thresholds, Top N, display options, and more.',
       cls: 'll-wiz-desc ll-wiz-desc-muted',
     });
     const footerRow = this.mkFooter(body);
@@ -2784,7 +2741,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
     const makeProgress = (parent: HTMLElement, phrases = INDEX_PHRASES) => {
       const wrap     = parent.createEl('div', { cls: 'll-settings-prog' });
-      wrap.style.display = 'none';
+      wrap.setCssStyles({ display: 'none' });
       const pctEl    = wrap.createEl('p',   { cls: 'll-prog-pct' });
       const phraseEl = wrap.createEl('p',   { cls: 'll-prog-phrase' });
       const label    = wrap.createEl('p',   { cls: 'll-prog-label' });
@@ -2794,16 +2751,16 @@ class LinkLinkSettingTab extends PluginSettingTab {
       let stopPhrases: (() => void) | null = null;
 
       const show = (msg: string, pct: number) => {
-        wrap.style.display = 'block';
+        wrap.setCssStyles({ display: 'block' });
         pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : '');
         label.setText(msg);
-        bar.style.width = pct + '%';
+        bar.setCssStyles({ width: pct + '%' });
         bar.classList.toggle('indeterminate', pct === 0);
         if (stopPhrases === null) stopPhrases = startPhraseRotator(phraseEl, phrases, 3500, true);
       };
       const hide = (delay = 1800) => {
         stopPhrases?.(); stopPhrases = null;
-        setTimeout(() => { wrap.style.display = 'none'; }, delay);
+        window.setTimeout(() => { wrap.setCssStyles({ display: 'none' }); }, delay);
       };
       return { show, hide };
     };
@@ -2819,7 +2776,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const scroller = containerEl.closest('.vertical-tab-content') as HTMLElement | null;
         const scrollTop = scroller?.scrollTop ?? 0;
         switchTab(activeTab);
-        requestAnimationFrame(() => { if (scroller) scroller.scrollTop = scrollTop; });
+        window.requestAnimationFrame(() => { if (scroller) scroller.scrollTop = scrollTop; });
       });
     };
 
@@ -2842,7 +2799,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       let hideProg: (delay?: number) => void = () => {};
 
       // Model source
-      body.createEl('h3', { text: 'Model source' });
+      new Setting(body).setName('Model source').setHeading();
 
       const embSetting = new Setting(body)
         .setName('Embedding model')
@@ -2862,19 +2819,19 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
       // ? tooltip
       const helpBtn = embSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-      const tip = document.body.createEl('div', { cls: 'll-emb-tooltip' });
+      const tip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
       this.tooltipEl = tip;
       tip.innerHTML = `
         <div class="ll-tip-item"><div class="ll-tip-title">Built-in (lightweight)</div>
           <div class="ll-tip-body">A compact model shipped with the plugin. Runs fully offline with no downloads required.</div></div>
         <div class="ll-tip-item"><div class="ll-tip-title">Local model (Ollama)</div>
-          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>
+          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>
         <div class="ll-tip-item"><div class="ll-tip-title">Existing index file</div>
           <div class="ll-tip-body">Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.</div></div>`;
       helpBtn.addEventListener('mouseenter', () => {
         const r = helpBtn.getBoundingClientRect();
-        tip.style.top  = r.bottom + 6 + 'px';
-        tip.style.left = r.left   + 'px';
+        tip.setCssStyles({ top: r.bottom + 6 + 'px' });
+        tip.setCssStyles({ left: r.left   + 'px' });
         tip.classList.add('visible');
       });
       helpBtn.addEventListener('mouseleave', () => tip.classList.remove('visible'));
@@ -2954,9 +2911,9 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 const ping = async (): Promise<boolean | null> => {
                   try {
                     const base = (model.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
-                    const resp = await fetch(`${base}/api/tags`);
-                    if (!resp.ok) return null;
-                    const data = await resp.json() as { models?: { name: string }[] };
+                    const resp = await requestUrl(`${base}/api/tags`);
+                    if (resp.status !== 200) return null;
+                    const data = resp.json as { models?: { name: string }[] };
                     return (data.models ?? []).some(
                       (m: { name: string }) => m.name === model.modelName || m.name.startsWith(model.modelName + ':')
                     );
@@ -2974,7 +2931,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                   // if server is up but model not yet visible, wait and retry once.
                   if (first === false) {
                     const loading = connCell.createEl('span', { cls: 'll-conn-badge ll-conn-badge-warn', text: '⟳ Model loading…' });
-                    await new Promise(r => setTimeout(r, 2000));
+                    await new Promise(r => window.setTimeout(r, 2000));
                     loading.remove();
                     showBadge(await ping());
                   } else {
@@ -3025,7 +2982,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         renderModels();
       } else {
         body.createEl('p', {
-          text: 'Use an existing embedding index created by another plugin. The index file must be located inside your vault.',
+          text: 'Use an existing embedding index created by another plugin. The index file must be located inside your vault.',
           cls: 'll-model-info-desc',
         });
 
@@ -3063,7 +3020,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 S.existingIndexPath = f.path;
               }
               if (pathInput) pathInput.value = S.existingIndexPath;
-              validationEl.style.display = S.existingIndexPath ? 'none' : '';
+              validationEl.setCssStyles({ display: S.existingIndexPath ? 'none' : '' });
               await save();
             });
           }
@@ -3124,7 +3081,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                S.existingIndexPath = v;
                // uncheck all detected rows when typing manually
                detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
-               validationEl.style.display = v.trim() ? 'none' : '';
+               validationEl.setCssStyles({ display: v.trim() ? 'none' : '' });
                await save();
              });
             pathInput = t.inputEl;
@@ -3132,11 +3089,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
         // ── validation message ───────────────────────────────────────────
         const validationEl = body.createEl('p', { text: 'Index file is not configured', cls: 'll-error' });
-        validationEl.style.display = S.existingIndexPath.trim() ? 'none' : '';
+        validationEl.setCssStyles({ display: S.existingIndexPath.trim() ? 'none' : '' });
       }
 
       if (S.embeddingSource !== 'existing') {
-        body.createEl('h3', { text: 'Indexing target' });
+        new Setting(body).setName('Indexing target').setHeading();
 
         const targetSection = body.createEl('div', { cls: 'll-action-section ll-action-section-flat' });
         const modeHeader = targetSection.createEl('div', { cls: 'll-filter-mode-header' });
@@ -3189,7 +3146,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       }
 
       if (S.embeddingSource !== 'existing') {
-        body.createEl('h3', { text: 'Index vault' });
+        new Setting(body).setName('Index vault').setHeading();
 
         const idxSection = body.createEl('div', { cls: 'll-action-section' });
         idxSection.createEl('p', { cls: 'll-idx-desc',
@@ -3213,7 +3170,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           );
 
         const autoIdxHelpBtn = autoIdxSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-        const autoIdxTip = document.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
+        const autoIdxTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
         this.autoIndexTipEl = autoIdxTip;
         autoIdxTip.innerHTML = `
           <div class="ll-tip-item">
@@ -3238,8 +3195,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
           </div>`;
         autoIdxHelpBtn.addEventListener('mouseenter', () => {
           const r = autoIdxHelpBtn.getBoundingClientRect();
-          autoIdxTip.style.top  = r.bottom + 6 + 'px';
-          autoIdxTip.style.left = r.left   + 'px';
+          autoIdxTip.setCssStyles({ top: r.bottom + 6 + 'px' });
+          autoIdxTip.setCssStyles({ left: r.left   + 'px' });
           autoIdxTip.classList.add('visible');
         });
         autoIdxHelpBtn.addEventListener('mouseleave', () => autoIdxTip.classList.remove('visible'));
@@ -3256,13 +3213,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
             .onChange(async v => {
               S.mtimeSource = v as LinkLinkSettings['mtimeSource'];
               await save();
-              fieldWrap.style.display = v === 'frontmatter' ? '' : 'none';
+              fieldWrap.setCssStyles({ display: v === 'frontmatter' ? '' : 'none' });
             })
           );
 
         // ? tooltip on the setting name (same pattern as Embedding model)
         const mtimeHelpBtn = mtimeSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-        const mtimeTip = document.body.createEl('div', { cls: 'll-emb-tooltip' });
+        const mtimeTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
         this.mtimeTipEl = mtimeTip;
         mtimeTip.innerHTML = `
           <div class="ll-tip-item">
@@ -3277,14 +3234,14 @@ class LinkLinkSettingTab extends PluginSettingTab {
           </div>`;
         mtimeHelpBtn.addEventListener('mouseenter', () => {
           const r = mtimeHelpBtn.getBoundingClientRect();
-          mtimeTip.style.top  = r.bottom + 6 + 'px';
-          mtimeTip.style.left = r.left   + 'px';
+          mtimeTip.setCssStyles({ top: r.bottom + 6 + 'px' });
+          mtimeTip.setCssStyles({ left: r.left   + 'px' });
           mtimeTip.classList.add('visible');
         });
         mtimeHelpBtn.addEventListener('mouseleave', () => mtimeTip.classList.remove('visible'));
 
         const fieldWrap = idxSection.createEl('div', { cls: 'll-mtime-field-wrap' });
-        fieldWrap.style.display = S.mtimeSource === 'frontmatter' ? '' : 'none';
+        fieldWrap.setCssStyles({ display: S.mtimeSource === 'frontmatter' ? '' : 'none' });
 
         new Setting(fieldWrap)
           .setName('Frontmatter field')
@@ -3312,7 +3269,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           );
 
         const progDispHelpBtn = progDispSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-        const progDispTip = document.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
+        const progDispTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
         this.progressDisplayTipEl = progDispTip;
         progDispTip.innerHTML = `
           <div class="ll-tip-item">
@@ -3328,8 +3285,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
           </div>`;
         progDispHelpBtn.addEventListener('mouseenter', () => {
           const r = progDispHelpBtn.getBoundingClientRect();
-          progDispTip.style.top  = r.bottom + 6 + 'px';
-          progDispTip.style.left = r.left   + 'px';
+          progDispTip.setCssStyles({ top: r.bottom + 6 + 'px' });
+          progDispTip.setCssStyles({ left: r.left   + 'px' });
           progDispTip.classList.add('visible');
         });
         progDispHelpBtn.addEventListener('mouseleave', () => progDispTip.classList.remove('visible'));
@@ -3344,7 +3301,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const idxBtn  = idxRow.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
         const idxIcon = idxBtn.createEl('span', { cls: 'll-btn-icon' });
         setIcon(idxIcon, 'database');
-        const idxLabel = idxBtn.createEl('span', { text: 'Index vault' });
+        idxBtn.createEl('span', { text: 'Index vault' });
 
         const deleteSlot = idxRow.createEl('div');
         const rebuildDeleteGroup = async () => {
@@ -3480,12 +3437,12 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 const { added, updated, removed } = await this.plugin.indexingService.index(onProgress);
                 const summary = added + updated === 0
                   ? 'Index is up to date.'
-                  : `+${added} new, ${updated} updated, ${removed} removed`;
+                  : `+${added} new, ${updated} updated, ${removed} removed`;
                 onDone(summary);
                 showProg('Indexing complete!', 100);
                 hideProg();
                 this.plugin.refreshView();
-                setTimeout(() => rebuildDeleteGroup(), 2000);
+                window.setTimeout(() => rebuildDeleteGroup(), 2000);
               } catch (e) {
                 onError();
                 showProg(`Error: ${e instanceof Error ? e.message : String(e)}`, 0);
@@ -3500,7 +3457,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
     // ── INTERLINK VAULT TAB ──────────────────────────────────────────────
 
     const renderInterlink = () => {
-      body.createEl('h3', { text: 'Exceptions' });
+      new Setting(body).setName('Exceptions').setHeading();
 
       filterSection(body.createEl('div', { cls: 'll-action-section ll-action-section-flat' }), app,
         'Completely ignored',
@@ -3516,7 +3473,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         async v => { S.readOnlyPaths = v; await save(); }
       );
 
-      body.createEl('h3', { text: 'Search parameters' });
+      new Setting(body).setName('Search parameters').setHeading();
 
       slider(body,
         'Top N results',
@@ -3529,7 +3486,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         'threshold', 0, 1, 0.05
       );
 
-      body.createEl('h3', { text: 'Frontmatter field' });
+      new Setting(body).setName('Frontmatter field').setHeading();
 
       let lastValidRelatedField = S.relatedFieldName;
       const fieldSetting = new Setting(body)
@@ -3540,46 +3497,46 @@ class LinkLinkSettingTab extends PluginSettingTab {
           const input = t.inputEl;
           input.addEventListener('input', () => {
             const err = validateFmFieldName(input.value.trim());
-            fieldErrEl.style.display = err ? 'block' : 'none';
+            fieldErrEl.setCssStyles({ display: err ? 'block' : 'none' });
             if (err) fieldErrEl.setText(err);
           });
           input.addEventListener('blur', async () => {
             const v = input.value.trim();
             const err = validateFmFieldName(v);
-            if (err) { input.value = lastValidRelatedField; fieldErrEl.style.display = 'none'; fieldConfirmRow.style.display = 'none'; return; }
-            fieldConfirmRow.style.display = 'none';
+            if (err) { input.value = lastValidRelatedField; fieldErrEl.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' }); return; }
+            fieldConfirmRow.setCssStyles({ display: 'none' });
             if (v && v !== lastValidRelatedField) {
               let count = 0;
               for (const file of app.vault.getMarkdownFiles()) {
                 if (app.metadataCache.getFileCache(file)?.frontmatter?.[v] !== undefined) count++;
               }
-              if (count > 0) { fieldErrEl.setText(`${count} note${count > 1 ? 's' : ''} already use "${v}:" — content will be overwritten on interlink.`); fieldErrEl.style.display = 'block'; fieldConfirmRow.style.display = 'flex'; return; }
-              else { fieldErrEl.style.display = 'none'; }
-            } else { fieldErrEl.style.display = 'none'; }
+              if (count > 0) { fieldErrEl.setText(`${count} note${count > 1 ? 's' : ''} already use "${v}:" — content will be overwritten on interlink.`); fieldErrEl.setCssStyles({ display: 'block' }); fieldConfirmRow.setCssStyles({ display: 'flex' }); return; }
+              else { fieldErrEl.setCssStyles({ display: 'none' }); }
+            } else { fieldErrEl.setCssStyles({ display: 'none' }); }
             lastValidRelatedField = v; S.relatedFieldName = v; await save();
           });
         });
-      const fieldErrEl = body.createEl('p', { cls: 'll-modal-error' }); fieldErrEl.style.display = 'none';
-      const fieldConfirmRow = body.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.style.display = 'none';
+      const fieldErrEl = body.createEl('p', { cls: 'll-modal-error' }); fieldErrEl.setCssStyles({ display: 'none' });
+      const fieldConfirmRow = body.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
         const input = fieldSetting.controlEl.querySelector('input') as HTMLInputElement;
         if (input) input.value = lastValidRelatedField;
-        fieldErrEl.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+        fieldErrEl.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       });
       fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', async () => {
         const input = fieldSetting.controlEl.querySelector('input') as HTMLInputElement;
         const v = input?.value.trim() ?? '';
         lastValidRelatedField = v; S.relatedFieldName = v; await save();
-        fieldErrEl.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+        fieldErrEl.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       });
 
-      body.createEl('h3', { text: 'Run interlink' });
+      new Setting(body).setName('Run interlink').setHeading();
 
       const ilSection = body.createEl('div', { cls: 'll-action-section' });
       ilSection.createEl('div', { cls: 'll-interlink-lead',
         text: 'Interlink Vault connects your notes with similar concepts and ideas.' });
       ilSection.createEl('div', { cls: 'll-interlink-body',
-        text: 'It reads your vault\'s embeddings — a compact numerical representation of each note\'s content — ' +
+        text: 'It reads your vault\'s embeddings — a compact numerical representation of each note\'s content — ' +
               'and finds notes that are semantically similar to each other. When you run Interlink, it writes those ' +
               'connections into each note\'s frontmatter as native Obsidian [[links]], under the field you configure above.' });
       ilSection.createEl('div', { cls: 'll-interlink-footer',
@@ -3670,7 +3627,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
     // ── GRAPH TAB ────────────────────────────────────────────────────────
 
     const renderGraph = () => {
-      body.createEl('h3', { text: 'Display' });
+      new Setting(body).setName('Display').setHeading();
 
       new Setting(body)
         .setName('View mode')
@@ -3699,7 +3656,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const inp = s.controlEl.createEl('input');
         inp.type  = 'color';
         inp.value = S[key];
-        inp.style.cssText = 'cursor:pointer;border:none;background:none;width:36px;height:28px;padding:2px';
+        inp.setCssStyles({ cursor: 'pointer', border: 'none', background: 'none', width: '36px', height: '28px', padding: '2px' });
         inp.addEventListener('input', async () => { S[key] = inp.value; await save(); });
         addReset(s, key);
       };
@@ -3716,7 +3673,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       slider(body, 'Node size',           'Multiplier for all node sizes.',      'nodeSizeMultiplier', 0.5, 3,  0.1);
       slider(body, 'Link thickness',      'Multiplier for edge thickness.',      'lineSizeMultiplier', 0.5, 5,  0.25);
 
-      body.createEl('h3', { text: 'Forces' });
+      new Setting(body).setName('Forces').setHeading();
 
       slider(body, 'Center force',  'How strongly notes are pulled toward the center.', 'centerStrength', 0,  1,  0.05);
       slider(body, 'Repel force',   'How strongly notes push away from each other.',    'repelStrength',  0,  20, 0.5);
