@@ -749,10 +749,13 @@ class LinkLinkView extends ItemView {
         async () => {
           try {
             const index = await this.plugin.loadAnyIndex();
-            const ok = await this.plugin.interlinkService.runForFile(activeFile, index);
-            new Notice(ok
-              ? `Updated related links for "${activeFile.basename}".`
-              : `"${activeFile.basename}" is not in the index — run indexing first.`
+            const result = await this.plugin.interlinkService.runForFile(activeFile, index);
+            const field = this.plugin.settings.relatedFieldName || 'related';
+            new Notice(result === false
+              ? `"${activeFile.basename}" is not in the index — run indexing first.`
+              : result === 0
+                ? `Updated related links for "${activeFile.basename}". No similar notes found.`
+                : `Updated related links for "${activeFile.basename}". ${result} similar note${result === 1 ? '' : 's'} added to "${field}:"`
             );
           } catch (e) { new Notice(`Error: ${e instanceof Error ? e.message : String(e)}`); }
         }
@@ -1463,10 +1466,13 @@ export default class LinkLinkPlugin extends Plugin {
         (async () => {
           try {
             const index = await this.loadAnyIndex();
-            const ok = await this.interlinkService.runForFile(file, index);
-            new Notice(ok
-              ? `Updated related links for "${file.basename}".`
-              : `"${file.basename}" is not in the index — run Index Vault first.`
+            const result = await this.interlinkService.runForFile(file, index);
+            const field = this.settings.relatedFieldName || 'related';
+            new Notice(result === false
+              ? `"${file.basename}" is not in the index — run Index Vault first.`
+              : result === 0
+                ? `Updated related links for "${file.basename}". No similar notes found.`
+                : `Updated related links for "${file.basename}". ${result} similar note${result === 1 ? '' : 's'} added to "${field}:"`
             );
           } catch (e) {
             new Notice(`Interlink failed: ${e instanceof Error ? e.message : String(e)}`);

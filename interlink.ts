@@ -175,7 +175,7 @@ export class InterlinkService {
     return { updated, skipped: writable.length - updated };
   }
 
-  async runForFile(file: TFile, index: IndexEntry[]): Promise<boolean> {
+  async runForFile(file: TFile, index: IndexEntry[]): Promise<number | false> {
     if (this.isIgnored(file.path) || this.isReadOnly(file.path)) return false;
     const field = this.plugin.settings.relatedFieldName || 'related';
     const pool  = index.filter(e => !this.isIgnored(e.path));
@@ -187,7 +187,7 @@ export class InterlinkService {
       if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
       else delete fm[field];
     });
-    return true;
+    return links.length;
   }
 
   // ── Clear related field ───────────────────────────────────────────────────
