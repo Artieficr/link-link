@@ -1315,7 +1315,7 @@ class IndexProgressPopup {
     this.el = document.body.createEl('div', { cls: 'll-idx-popup' });
 
     const header = this.el.createEl('div', { cls: 'll-idx-popup-header' });
-    this.titleEl = header.createEl('span', { text: 'Link Link — Indexing', cls: 'll-idx-popup-title' });
+    this.titleEl = header.createEl('span', { text: 'Link Link! — Indexing', cls: 'll-idx-popup-title' });
     const closeBtn = header.createEl('button', { cls: 'll-idx-popup-close', text: '×' });
     closeBtn.addEventListener('click', () => {
       this.dismissed = true;
@@ -1334,7 +1334,7 @@ class IndexProgressPopup {
   }
 
   update(msg: string, pct: number) {
-    this.titleEl.setText(pct > 0 ? `Link Link — Indexing: ${Math.round(pct)}%` : 'Link Link — Indexing');
+    this.titleEl.setText(pct > 0 ? `Link Link! — Indexing: ${Math.round(pct)}%` : 'Link Link! — Indexing');
     this.statusEl.setText(msg);
     this.barEl.style.width = pct + '%';
     this.barEl.classList.toggle('indeterminate', pct === 0);
@@ -1343,7 +1343,7 @@ class IndexProgressPopup {
   finish(summary: string, timeoutSec: number) {
     this.isFinished = true;
     this.stopPhrases?.(); this.stopPhrases = null;
-    this.titleEl.setText('Link Link ✓');
+    this.titleEl.setText('Link Link! ✓');
     this.phraseEl.style.opacity = '1';
     this.phraseEl.setText('Done!');
     this.barEl.classList.remove('indeterminate');
@@ -1383,7 +1383,7 @@ export default class LinkLinkPlugin extends Plugin {
       return {
         onProgress: (msg, pct) => { popup.update(msg, pct); secondary?.(msg, pct); },
         onDone: (summary) => {
-          if (popup.dismissed) new Notice(`Link Link ✓  ${summary}`, t > 0 ? t * 1000 : 0);
+          if (popup.dismissed) new Notice(`Link Link! ✓  ${summary}`, t > 0 ? t * 1000 : 0);
           else popup.finish(summary, t);
           // Keep this.indexPopup pointing at the finished popup so the next
           // run's close() call dismisses it before creating a fresh one.
@@ -1397,17 +1397,17 @@ export default class LinkLinkPlugin extends Plugin {
       let lastMsg   = '';
       const phraseTimer = window.setInterval(() => {
         phraseIdx = (phraseIdx + 1) % INDEX_PHRASES.length;
-        notice.setMessage(`Link Link — Indexing: ${Math.round(lastPct)}%\n${INDEX_PHRASES[phraseIdx]}\n${lastMsg}`);
+        notice.setMessage(`Link Link! — Indexing: ${Math.round(lastPct)}%\n${INDEX_PHRASES[phraseIdx]}\n${lastMsg}`);
       }, 3500);
       return {
         onProgress: (msg, pct) => {
           lastPct = pct; lastMsg = msg;
-          notice.setMessage(`Link Link — Indexing: ${Math.round(pct)}%\n${INDEX_PHRASES[phraseIdx]}\n${msg}`);
+          notice.setMessage(`Link Link! — Indexing: ${Math.round(pct)}%\n${INDEX_PHRASES[phraseIdx]}\n${msg}`);
           secondary?.(msg, pct);
         },
         onDone: (summary) => {
           clearInterval(phraseTimer);
-          notice.setMessage(`Link Link ✓  ${summary}`);
+          notice.setMessage(`Link Link! ✓  ${summary}`);
           if (t > 0) setTimeout(() => notice.hide(), t * 1000);
         },
         onError: () => { clearInterval(phraseTimer); notice.hide(); },
@@ -1415,7 +1415,7 @@ export default class LinkLinkPlugin extends Plugin {
     } else {
       return {
         onProgress: (msg, pct) => secondary?.(msg, pct),
-        onDone:  (summary) => { new Notice(`Link Link ✓  ${summary}`, t > 0 ? t * 1000 : 0); },
+        onDone:  (summary) => { new Notice(`Link Link! ✓  ${summary}`, t > 0 ? t * 1000 : 0); },
         onError: () => {},
       };
     }
@@ -2100,7 +2100,7 @@ class SetupWizardModal extends Modal {
   private renderWelcome(body: HTMLElement) {
     body.createEl('div', { text: 'Welcome to Link Link!', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Link Link finds semantically related notes in your vault using embeddings — a compact numerical representation of what each note means.',
+      text: 'Link Link! finds semantically related notes in your vault using embeddings — a compact numerical representation of what each note means.',
       cls: 'll-wiz-desc',
     });
     body.createEl('p', {
@@ -2269,7 +2269,7 @@ class SetupWizardModal extends Modal {
   private renderIndexFile(body: HTMLElement) {
     body.createEl('div', { text: 'Select index file', cls: 'll-wiz-title' });
     body.createEl('p', {
-      text: 'Link Link will read an existing embedding index from inside your vault. Select the file below, or enter its path manually.',
+      text: 'Link Link! will read an existing embedding index from inside your vault. Select the file below, or enter its path manually.',
       cls: 'll-wiz-desc',
     });
 
