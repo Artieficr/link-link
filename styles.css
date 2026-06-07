@@ -461,6 +461,17 @@
 .ll-model-info-link { font-size: 0.82em; color: var(--text-accent); cursor: pointer; text-decoration: none; }
 .ll-model-info-link:hover { text-decoration: underline; }
 
+/* Existing index file — auto-detected list */
+.ll-detected-wrap  { margin: 8px 0 4px; }
+.ll-detected-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.ll-detected-title { font-size: 0.85em; font-weight: 600; color: var(--text-normal); }
+.ll-detected-list  { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.ll-detected-empty { font-size: 0.82em; color: var(--text-muted); margin: 0; }
+.ll-detected-row   { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: var(--background-secondary); border-radius: 5px; }
+.ll-detected-path  { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.ll-detected-path-text { font-size: 0.82em; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ll-detected-format    { font-size: 0.75em; color: var(--text-muted); }
+
 /* Danger button (destructive confirm) */
 .ll-btn-danger {
   padding: 5px 14px; border-radius: 5px; border: none; cursor: pointer;

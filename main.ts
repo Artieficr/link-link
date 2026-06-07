@@ -30,8 +30,9 @@ interface OllamaModel {
 interface LinkLinkSettings {
   topN: number;
   threshold: number;
-  embeddingSource: 'builtin' | 'copilot' | 'local';
-  copilotIndexPath: string;
+  embeddingSource: 'builtin' | 'existing' | 'local';
+  existingIndexPath: string;
+  detectedIndexFiles: { path: string; format: string }[];
   ollamaModels: OllamaModel[];
   // Indexing filters
   indexMode: 'exclude' | 'include';
@@ -66,7 +67,8 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   topN: 15,
   threshold: 0.5,
   embeddingSource: 'builtin',
-  copilotIndexPath: '',
+  existingIndexPath: '',
+  detectedIndexFiles: [],
   ollamaModels: [],
   indexMode: 'exclude',
   excludePaths: [],
@@ -94,15 +96,6 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   lineSizeMultiplier: 1,
 };
 
-interface DocEntry {
-  title: string;
-  path: string;
-  embedding: number[] | null;
-}
-
-interface CopilotIndex {
-  docs: { docs: Record<string, DocEntry> };
-}
 
 interface GNode {
   file: TFile | null;
@@ -753,13 +746,13 @@ class LinkLinkView extends ItemView {
       const controls = header.createEl('div', { cls: 'll-controls' });
 
       mkIconBtn(controls, 'refresh-cw', 'Update panel',
-        this.plugin.settings.embeddingSource === 'copilot'
+        this.plugin.settings.embeddingSource === 'existing'
           ? 'Refresh the panel to pick up recent changes.'
           : 'Re-index this note and refresh the panel to pick up recent changes.',
         'right',
         async () => {
           try {
-            if (this.plugin.settings.embeddingSource !== 'copilot') {
+            if (this.plugin.settings.embeddingSource !== 'existing') {
               await this.plugin.indexingService.index(() => {}, [activeFile]);
             }
             await this.refresh();
@@ -847,9 +840,9 @@ class LinkLinkView extends ItemView {
       : `No embedding for "${err.fileName}".`;
     body.createEl('p', { text: msgText, cls: 'll-error' });
 
-    if (err.source === 'copilot') {
+    if (err.source === 'existing') {
       body.createEl('p', {
-        text: 'Try re-indexing in Copilot settings (Copilot → Index (refresh) vault).',
+        text: 'Make sure an index file is selected in Settings → Embedding.',
         cls: 'll-error-hint'
       });
     } else if (isExcluded) {
@@ -1293,8 +1286,8 @@ export default class LinkLinkPlugin extends Plugin {
   settings: LinkLinkSettings = DEFAULT_SETTINGS;
   indexingService!: IndexingService;
   interlinkService!: InterlinkService;
-  private indexCache: CopilotIndex | null = null;
-  private indexMtime = 0;
+  private existingIndexCache: IndexEntry[] | null = null;
+  private existingIndexMtime = 0;
   private indexPopup: IndexProgressPopup | null = null;
 
   createProgressDisplay(secondary?: (msg: string, pct: number) => void): {
@@ -1362,8 +1355,8 @@ export default class LinkLinkPlugin extends Plugin {
       id: 'index-vault',
       name: 'Index Vault',
       callback: async () => {
-        if (this.settings.embeddingSource === 'copilot') {
-          new Notice('Index Vault is not available with the Copilot Plugin. Switch to Built-in or Local model (Ollama) in Settings → Embedding.');
+        if (this.settings.embeddingSource === 'existing') {
+          new Notice('Index Vault is not available when using an existing index file. Switch to Built-in or Local model (Ollama) in Settings → Embedding.');
           return;
         }
         if (this.settings.embeddingSource === 'local' && !this.settings.ollamaModels.some(m => m.active)) {
@@ -1451,7 +1444,7 @@ export default class LinkLinkPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('modify', (file) => {
       if (!(file instanceof TFile) || file.extension !== 'md') return;
       if (this.settings.autoIndexMode !== 'file-save') return;
-      if (this.settings.embeddingSource === 'copilot') return;
+      if (this.settings.embeddingSource === 'existing') return;
       pendingFiles.add(file);
       if (fileSaveTimer) clearTimeout(fileSaveTimer);
       fileSaveTimer = setTimeout(() => {
@@ -1478,7 +1471,7 @@ export default class LinkLinkPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.activateView();
       // Auto-index on startup (delayed to not block Obsidian loading)
-      if (this.settings.autoIndexMode === 'startup' && this.settings.embeddingSource !== 'copilot') {
+      if (this.settings.autoIndexMode === 'startup' && this.settings.embeddingSource !== 'existing') {
         setTimeout(() => {
           const { onProgress, onDone, onError } = this.createProgressDisplay();
           this.indexingService.index(onProgress)
@@ -1523,43 +1516,68 @@ export default class LinkLinkPlugin extends Plugin {
     if (leaf?.view instanceof LinkLinkView) leaf.view.updateBadges(file);
   }
 
-  private async loadCopilotIndex(): Promise<CopilotIndex> {
-    const adapter = this.app.vault.adapter;
-    const dir = this.settings.copilotIndexPath.trim() || '.obsidian';
-    // @ts-ignore
-    const listed = await adapter.list(dir);
-    const indexFile = listed.files.find((f: string) => /copilot-index-.*\.json$/.test(f));
-    if (!indexFile) throw new Error('Copilot index not found. Is Copilot plugin installed and indexed?');
-    // @ts-ignore
-    const stat = await adapter.stat(indexFile);
-    if (this.indexCache && stat?.mtime === this.indexMtime) return this.indexCache;
-    // @ts-ignore
-    const raw = await adapter.read(indexFile);
-    this.indexCache = JSON.parse(raw) as CopilotIndex;
-    this.indexMtime = stat?.mtime ?? 0;
-    return this.indexCache;
-  }
-
-  async loadAnyIndex(): Promise<IndexEntry[]> {
-    if (this.settings.embeddingSource === 'copilot') {
-      const raw  = await this.loadCopilotIndex();
-      const docs = raw.docs.docs as Record<string, any>;
+  private static normalizeIndex(raw: string): IndexEntry[] {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return (parsed as any[])
+        .filter(e => e.path && e.embedding)
+        .map(e => ({ path: e.path, title: e.title ?? e.path, embedding: e.embedding, mtime: e.mtime }));
+    }
+    if (parsed?.docs?.docs && typeof parsed.docs.docs === 'object') {
       const seen = new Map<string, IndexEntry>();
-      for (const d of Object.values(docs)) {
-        const dd = d as any;
-        if (!dd.path || !dd.embedding) continue;
-        if (!seen.has(dd.path)) seen.set(dd.path, { path: dd.path, title: dd.title ?? dd.path, embedding: dd.embedding });
+      for (const d of Object.values(parsed.docs.docs) as any[]) {
+        if (!d.path || !d.embedding) continue;
+        if (!seen.has(d.path)) seen.set(d.path, { path: d.path, title: d.title ?? d.path, embedding: d.embedding });
       }
       return [...seen.values()];
     }
+    throw new Error('Unrecognized index format');
+  }
+
+  private async loadExistingIndex(): Promise<IndexEntry[]> {
+    const path = this.settings.existingIndexPath.trim();
+    if (!path) throw new Error('Index file is not configured');
+    const adapter = this.app.vault.adapter;
+    // @ts-ignore
+    const stat = await adapter.stat(path);
+    if (!stat) throw new Error('Index file is not configured');
+    if (this.existingIndexCache && stat.mtime === this.existingIndexMtime) return this.existingIndexCache;
+    // @ts-ignore
+    const raw = await adapter.read(path);
+    this.existingIndexCache = LinkLinkPlugin.normalizeIndex(raw);
+    this.existingIndexMtime = stat.mtime ?? 0;
+    return this.existingIndexCache;
+  }
+
+  async scanForIndexFiles(): Promise<{ path: string; format: string }[]> {
+    const adapter = this.app.vault.adapter;
+    // @ts-ignore
+    const listed = await adapter.list('.obsidian');
+    const results: { path: string; format: string }[] = [];
+    for (const filePath of listed.files as string[]) {
+      if (!filePath.endsWith('.json')) continue;
+      try {
+        // @ts-ignore
+        const raw = await adapter.read(filePath);
+        const parsed = JSON.parse(raw);
+        if (parsed?.docs?.docs && typeof parsed.docs.docs === 'object') {
+          results.push({ path: filePath, format: 'Copilot index' });
+        } else if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.embedding) {
+          results.push({ path: filePath, format: 'Link-link index' });
+        }
+      } catch { /* skip unreadable files */ }
+    }
+    return results;
+  }
+
+  async loadAnyIndex(): Promise<IndexEntry[]> {
+    if (this.settings.embeddingSource === 'existing') return this.loadExistingIndex();
     return this.indexingService.loadIndex();
   }
 
   async getRelated(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
-    if (this.settings.embeddingSource !== 'copilot') {
-      return this.getRelatedFromBuiltin(file, naturalPaths);
-    }
-    return this.getRelatedFromCopilot(file, naturalPaths);
+    if (this.settings.embeddingSource === 'existing') return this.getRelatedFromExisting(file, naturalPaths);
+    return this.getRelatedFromBuiltin(file, naturalPaths);
   }
 
   private async getRelatedFromBuiltin(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
@@ -1589,27 +1607,22 @@ export default class LinkLinkPlugin extends Plugin {
     return [...semantic.slice(0, topN), ...natural];
   }
 
-  private async getRelatedFromCopilot(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
-    const index = await this.loadCopilotIndex();
-    const docs  = index.docs.docs;
-    const currentPath = file.path;
-    let currentEmbedding: number[] | null = null;
-    for (const entry of Object.values(docs)) {
-      if (entry.path === currentPath && entry.embedding) { currentEmbedding = entry.embedding; break; }
+  private async getRelatedFromExisting(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
+    let index: IndexEntry[];
+    try {
+      index = await this.loadExistingIndex();
+    } catch {
+      throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
     }
-    if (!currentEmbedding) throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
-    const best = new Map<string, number>();
-    for (const entry of Object.values(docs)) {
-      if (entry.path === currentPath || !entry.embedding) continue;
-      const score = cosine(currentEmbedding, entry.embedding);
-      if (score < this.settings.threshold) continue;
-      const prev = best.get(entry.path) ?? 0;
-      if (score > prev) best.set(entry.path, score);
-    }
+    const curr = index.find(e => e.path === file.path);
+    if (!curr) throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
     const results: { file: TFile; score: number }[] = [];
-    for (const [path, score] of best) {
-      const tfile = this.app.vault.getFileByPath(path);
-      if (tfile) results.push({ file: tfile, score });
+    for (const e of index) {
+      if (e.path === file.path) continue;
+      const s = cosine(curr.embedding, e.embedding);
+      if (s < this.settings.threshold) continue;
+      const tf = this.app.vault.getFileByPath(e.path);
+      if (tf) results.push({ file: tf, score: s });
     }
     results.sort((a, b) => b.score - a.score);
     const { topN } = this.settings;
@@ -1651,21 +1664,17 @@ export default class LinkLinkPlugin extends Plugin {
 
     if (missing.length === 0) return [];
 
-    if (this.settings.embeddingSource !== 'copilot') {
-      try {
-        const index = await this.indexingService.loadIndex();
-        const currEntry = index.find(e => e.path === currentFile.path);
-        if (!currEntry) return missing.map(f => ({ file: f, score: 0 }));
-        return missing.map(f => {
-          const entry = index.find(e => e.path === f.path);
-          return { file: f, score: entry ? cosine(currEntry.embedding, entry.embedding) : 0 };
-        });
-      } catch {
-        return missing.map(f => ({ file: f, score: 0 }));
-      }
+    try {
+      const index = await this.loadAnyIndex();
+      const currEntry = index.find(e => e.path === currentFile.path);
+      if (!currEntry) return missing.map(f => ({ file: f, score: 0 }));
+      return missing.map(f => {
+        const entry = index.find(e => e.path === f.path);
+        return { file: f, score: entry ? cosine(currEntry.embedding, entry.embedding) : 0 };
+      });
+    } catch {
+      return missing.map(f => ({ file: f, score: 0 }));
     }
-
-    return missing.map(f => ({ file: f, score: 0 }));
   }
 
   getLinkedPaths(currentFile: TFile, results: { file: TFile; score: number }[]): Set<string> {
@@ -1697,7 +1706,13 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = await this.loadData() ?? {};
+    if (data.embeddingSource === 'copilot') {
+      data.embeddingSource = 'existing';
+      data.existingIndexPath = '';
+      delete data.copilotIndexPath;
+    }
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
 
   async saveSettings() {
@@ -2051,9 +2066,9 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .setName('Embedding model')
         .addDropdown(d => d
           .addOptions({
-            builtin: 'Built-in (lightweight)',
-            copilot: 'Copilot Plugin',
-            local:   'Local model (Ollama)',
+            builtin:  'Built-in (lightweight)',
+            local:    'Local model (Ollama)',
+            existing: 'Existing index file',
           })
           .setValue(S.embeddingSource)
           .onChange(async v => {
@@ -2070,10 +2085,10 @@ class LinkLinkSettingTab extends PluginSettingTab {
       tip.innerHTML = `
         <div class="ll-tip-item"><div class="ll-tip-title">Built-in (lightweight)</div>
           <div class="ll-tip-body">A compact model shipped with the plugin. Runs fully offline with no downloads required.</div></div>
-        <div class="ll-tip-item"><div class="ll-tip-title">Copilot Plugin</div>
-          <div class="ll-tip-body">Uses the existing index created by the Obsidian Copilot plugin. Requires Copilot installed and indexed.</div></div>
         <div class="ll-tip-item"><div class="ll-tip-title">Local model (Ollama)</div>
-          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>`;
+          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>
+        <div class="ll-tip-item"><div class="ll-tip-title">Existing index file</div>
+          <div class="ll-tip-body">Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.</div></div>`;
       helpBtn.addEventListener('mouseenter', () => {
         const r = helpBtn.getBoundingClientRect();
         tip.style.top  = r.bottom + 6 + 'px';
@@ -2095,16 +2110,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           // @ts-ignore
           window.open('https://huggingface.co/Xenova/bge-small-en-v1.5', '_blank');
         });
-      } else if (S.embeddingSource === 'copilot') {
-        new Setting(body)
-          .setName('Index file directory')
-          .setDesc('Folder containing the Copilot index. Leave empty to use the default directory.')
-          .addText(t => t
-            .setPlaceholder('.obsidian/')
-            .setValue(S.copilotIndexPath)
-            .onChange(async v => { S.copilotIndexPath = v; await save(); })
-          );
-      } else {
+      } else if (S.embeddingSource === 'local') {
         const modelArea = body.createEl('div', { cls: 'll-model-area' });
 
         const renderModels = () => {
@@ -2235,9 +2241,119 @@ class LinkLinkSettingTab extends PluginSettingTab {
         };
 
         renderModels();
+      } else {
+        body.createEl('p', {
+          text: 'Use an existing embedding index created by another plugin. The index file must be located inside your vault.',
+          cls: 'll-model-info-desc',
+        });
+
+        // ── auto-detected files ──────────────────────────────────────────
+        const detectedWrap = body.createEl('div', { cls: 'll-detected-wrap' });
+        const detectedHeader = detectedWrap.createEl('div', { cls: 'll-detected-header' });
+        detectedHeader.createEl('span', { text: 'Auto-detected index files', cls: 'll-detected-title' });
+        const scanBtn = detectedHeader.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
+        setIcon(scanBtn.createEl('span', { cls: 'll-btn-icon' }), 'search');
+        scanBtn.createEl('span', { text: 'Scan' });
+        const detectedList = detectedWrap.createEl('div', { cls: 'll-detected-list' });
+
+        let pathInput: HTMLInputElement | null = null;
+
+        const renderDetected = (files: { path: string; format: string }[]) => {
+          detectedList.empty();
+          if (files.length === 0) {
+            detectedList.createEl('p', { text: 'No index files found.', cls: 'll-detected-empty' });
+            return;
+          }
+          for (const f of files) {
+            const row = detectedList.createEl('div', { cls: 'll-detected-row' });
+            const cb = row.createEl('input') as HTMLInputElement;
+            cb.type = 'checkbox';
+            cb.checked = S.existingIndexPath === f.path;
+            const label = row.createEl('span', { cls: 'll-detected-path' });
+            label.createEl('span', { text: f.path, cls: 'll-detected-path-text' });
+            label.createEl('span', { text: f.format, cls: 'll-detected-format' });
+            cb.addEventListener('change', async () => {
+              if (!cb.checked) {
+                S.existingIndexPath = '';
+              } else {
+                // uncheck others
+                detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { if (c !== cb) c.checked = false; });
+                S.existingIndexPath = f.path;
+              }
+              if (pathInput) pathInput.value = S.existingIndexPath;
+              validationEl.style.display = S.existingIndexPath ? 'none' : '';
+              await save();
+            });
+          }
+        };
+
+        const runScan = async (): Promise<{ path: string; format: string }[]> => {
+          scanBtn.disabled = true;
+          scanBtn.querySelector('span:last-child')!.textContent = 'Scanning…';
+          try {
+            const found = await this.plugin.scanForIndexFiles();
+            renderDetected(found);
+            return found;
+          } finally {
+            scanBtn.disabled = false;
+            scanBtn.querySelector('span:last-child')!.textContent = 'Scan';
+          }
+        };
+
+        scanBtn.addEventListener('click', async () => {
+          const found = await runScan();
+          S.detectedIndexFiles = found;
+          await save();
+        });
+
+        // On open: show stored list, pruning any files no longer on disk
+        const initList = async () => {
+          const adapter = this.plugin.app.vault.adapter;
+          const alive: { path: string; format: string }[] = [];
+          for (const f of S.detectedIndexFiles) {
+            // @ts-ignore
+            if (await adapter.exists(f.path)) alive.push(f);
+          }
+          if (alive.length !== S.detectedIndexFiles.length) {
+            S.detectedIndexFiles = alive;
+            if (!alive.some(f => f.path === S.existingIndexPath)) S.existingIndexPath = '';
+            await save();
+          }
+          if (alive.length > 0) {
+            renderDetected(alive);
+          } else if (!S.existingIndexPath) {
+            // nothing stored and nothing selected — auto-scan once
+            const found = await runScan();
+            S.detectedIndexFiles = found;
+            await save();
+          } else {
+            detectedList.createEl('p', { text: 'Press Scan to detect index files.', cls: 'll-detected-empty' });
+          }
+        };
+        initList();
+
+        // ── manual path ──────────────────────────────────────────────────
+        new Setting(body)
+          .setName('Index file path')
+          .addText(t => {
+            t.setPlaceholder('.obsidian/<path-to-your-index-file>')
+             .setValue(S.existingIndexPath)
+             .onChange(async v => {
+               S.existingIndexPath = v;
+               // uncheck all detected rows when typing manually
+               detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
+               validationEl.style.display = v.trim() ? 'none' : '';
+               await save();
+             });
+            pathInput = t.inputEl;
+          });
+
+        // ── validation message ───────────────────────────────────────────
+        const validationEl = body.createEl('p', { text: 'Index file is not configured', cls: 'll-error' });
+        validationEl.style.display = S.existingIndexPath.trim() ? 'none' : '';
       }
 
-      if (S.embeddingSource !== 'copilot') {
+      if (S.embeddingSource !== 'existing') {
         body.createEl('h3', { text: 'Indexing target' });
 
         const targetSection = body.createEl('div', { cls: 'll-action-section ll-action-section-flat' });
@@ -2290,7 +2406,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         }
       }
 
-      if (S.embeddingSource !== 'copilot') {
+      if (S.embeddingSource !== 'existing') {
         body.createEl('h3', { text: 'Index vault' });
 
         const idxSection = body.createEl('div', { cls: 'll-action-section' });
@@ -2474,7 +2590,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             canDelete: bStat.exists,
           });
 
-          opts.push({ value: '__copilot', label: 'Copilot plugin — cannot delete', path: '', canDelete: false });
+          if (S.embeddingSource === 'existing') opts.push({ value: '__existing', label: 'Existing index file — cannot delete', path: '', canDelete: false });
 
           for (const m of S.ollamaModels) {
             const mp    = this.plugin.indexingService.indexPathForModel(m.id);
