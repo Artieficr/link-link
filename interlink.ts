@@ -196,23 +196,20 @@ export class InterlinkService {
     onProgress: (msg: string, pct: number) => void
   ): Promise<number> {
     const field = this.plugin.settings.relatedFieldName || 'related';
-    const files = this.app.vault.getMarkdownFiles();
-    let cleared = 0;
+    const targets = this.app.vault.getMarkdownFiles().filter(f => {
+      if (this.isIgnored(f.path) || this.isReadOnly(f.path)) return false;
+      const cache = this.app.metadataCache.getFileCache(f);
+      return cache?.frontmatter?.[field] !== undefined;
+    });
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      onProgress(`${file.basename}`, (i / files.length) * 100);
-
-      if (this.isIgnored(file.path) || this.isReadOnly(file.path)) continue;
-      const cache = this.app.metadataCache.getFileCache(file);
-      if (cache?.frontmatter?.[field] === undefined) continue;
-
+    for (let i = 0; i < targets.length; i++) {
+      const file = targets[i];
+      onProgress(`${file.basename}`, (i / targets.length) * 100);
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         delete fm[field];
       });
-      cleared++;
     }
 
-    return cleared;
+    return targets.length;
   }
 }
