@@ -1,8 +1,15 @@
 /// <reference types="node" />
 import * as nFs   from 'node:fs';
 import * as nPath from 'node:path';
-import { App, Notice, TFile, requestUrl } from 'obsidian';
+import { App, FileSystemAdapter, Notice, TFile, requestUrl } from 'obsidian';
 import type LinkLinkPlugin from './main';
+
+// @xenova/transformers has no public TypeScript types; these minimal interfaces
+// cover the subset we actually call.
+type EmbedderFn = (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: ArrayLike<number> }>;
+interface ModelLoadProgress { status: string; file?: string; progress?: number; }
+// onnxruntime-web's WASM backend config is not exported — use a local interface.
+interface OnnxWasmConfig { wasmPaths?: Record<string, string>; numThreads?: number; }
 
 export interface IndexEntry {
   path: string;
@@ -14,8 +21,7 @@ export interface IndexEntry {
 export class IndexingService {
   private app: App;
   private plugin: LinkLinkPlugin;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pipeline() returns an untyped object from @xenova/transformers which has no public TypeScript types
-  private embedder: any = null;
+  private embedder: EmbedderFn | null = null;
 
   constructor(app: App, plugin: LinkLinkPlugin) {
     this.app = app;
@@ -29,9 +35,11 @@ export class IndexingService {
   }
 
   private get pluginAbsPath(): string {
-    const adapter = this.app.vault.adapter as any;
-    const base: string = typeof adapter.getBasePath === 'function' ? adapter.getBasePath() : (adapter.basePath ?? '');
-    return `${base}/${this.pluginDir}`;
+    const adapter = this.app.vault.adapter;
+    if (adapter instanceof FileSystemAdapter) {
+      return `${adapter.getBasePath()}/${this.pluginDir}`;
+    }
+    return this.pluginDir;
   }
 
   private get modelsDir(): string {
@@ -39,8 +47,7 @@ export class IndexingService {
   }
 
   private async ensureOllama(onProgress: (msg: string, pct: number) => void): Promise<boolean> {
-    const models: { id: string; active: boolean; modelName: string; baseUrl: string }[] =
-      (this.plugin.settings as any).ollamaModels ?? [];
+    const models = this.plugin.settings.ollamaModels;
     const active = models.find(m => m.active);
     if (!active) {
       new Notice('No active Ollama model configured. Go to Settings → Embedding and add one.');
@@ -99,8 +106,7 @@ export class IndexingService {
       const simdUrl = wasmBlob('ort-wasm-simd.wasm');
       const baseUrl = wasmBlob('ort-wasm.wasm');
       if (simdUrl || baseUrl) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- env.backends.onnx.wasm type is not publicly typed in onnxruntime-web
-        (env.backends.onnx.wasm as any).wasmPaths = {
+        (env.backends.onnx.wasm as unknown as OnnxWasmConfig).wasmPaths = {
           ...(simdUrl ? { 'ort-wasm-simd.wasm': simdUrl } : {}),
           ...(baseUrl ? { 'ort-wasm.wasm':      baseUrl } : {}),
         };
@@ -133,16 +139,15 @@ export class IndexingService {
         'Xenova/bge-small-en-v1.5',
         {
           quantized: true,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- progress_callback parameter type is not exported from @xenova/transformers
-          progress_callback: (p: any) => {
+          progress_callback: (p: ModelLoadProgress) => {
             if (p.status === 'downloading') {
-              onProgress(`Downloading model: ${p.file} (${Math.round(p.progress ?? 0)}%)`, 2 + (p.progress ?? 0) * 0.06);
+              onProgress(`Downloading model: ${p.file ?? ''} (${Math.round(p.progress ?? 0)}%)`, 2 + (p.progress ?? 0) * 0.06);
             } else if (p.status === 'loading') {
               onProgress('Loading model into memory…', 8);
             }
           },
         }
-      );
+      ) as EmbedderFn;
 
       onProgress('Model ready.', 10);
       return true;
@@ -155,8 +160,7 @@ export class IndexingService {
 
   async embed(text: string): Promise<number[]> {
     if (this.plugin.settings.embeddingSource === 'local') {
-      const models: { id: string; active: boolean; modelName: string; baseUrl: string }[] =
-        (this.plugin.settings as any).ollamaModels ?? [];
+      const models = this.plugin.settings.ollamaModels;
       const active = models.find(m => m.active);
       if (!active) throw new Error('No active Ollama model configured');
       const base = (active.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
@@ -175,7 +179,7 @@ export class IndexingService {
     }
     if (!this.embedder) throw new Error('Model not loaded');
     const out = await this.embedder(text, { pooling: 'mean', normalize: true });
-    return Array.from(out.data) as number[];
+    return Array.from(out.data);
   }
 
   // ── File filtering ────────────────────────────────────────────────────────
@@ -226,7 +230,7 @@ export class IndexingService {
 
   private get indexPath(): string {
     if (this.plugin.settings.embeddingSource === 'local') {
-      const models: { id: string; active: boolean }[] = (this.plugin.settings as any).ollamaModels ?? [];
+      const models = this.plugin.settings.ollamaModels;
       const active = models.find(m => m.active);
       if (active) return `${this.pluginDir}/link-link-index-${active.id}.json`;
     }

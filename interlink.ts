@@ -164,7 +164,7 @@ export class InterlinkService {
       const links = this.findRelated(entry, pool, naturalPaths);
 
       // Use Obsidian's frontmatter API — handles YAML parsing/writing correctly
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
+      await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
         if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
       });
 
@@ -183,7 +183,7 @@ export class InterlinkService {
     if (!entry) return false;
     const naturalPaths = this.getNaturalConnections(file);
     const links = this.findRelated(entry, pool, naturalPaths);
-    await this.app.fileManager.processFrontMatter(file, fm => {
+    await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
       else delete fm[field];
     });
@@ -205,7 +205,7 @@ export class InterlinkService {
     for (let i = 0; i < targets.length; i++) {
       const file = targets[i];
       onProgress(`${file.basename}`, (i / targets.length) * 100);
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
+      await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
         delete fm[field];
       });
     }

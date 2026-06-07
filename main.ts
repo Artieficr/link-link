@@ -491,7 +491,7 @@ class GraphSimulation {
         this.onInsertLink(this.dragFile, el, e.clientX, e.clientY);
       }
     } else if (this.isHoveringCenter && this.dragFile && this.dragNode !== this.nodes[0]) {
-      this.onToggleRelated(this.dragFile);
+      void this.onToggleRelated(this.dragFile);
     } else if (moved < 25 && this.dragFile) {
       this.onOpen(this.dragFile);
     }
@@ -823,8 +823,9 @@ class LinkLinkView extends ItemView {
       if (!(view instanceof MarkdownView)) continue;
       if (dropTarget && !view.containerEl.contains(dropTarget)) continue;
       const editor = view.editor;
-      // @ts-ignore — CM6 internal EditorView, used to convert screen coords to doc offset
-      const cm = editor.cm;
+      type CM6View = { posAtCoords?: (coords: { x: number; y: number }, inside?: boolean) => number | null };
+      // Access CM6 internal EditorView to convert screen coords to doc offset
+      const cm = (editor as unknown as { cm?: CM6View }).cm;
       if (cm?.posAtCoords) {
         const offset = cm.posAtCoords({ x: dropX, y: dropY }, false);
         if (typeof offset === 'number') editor.setCursor(editor.offsetToPos(offset));
@@ -998,8 +999,9 @@ class LinkLinkView extends ItemView {
       // ── Related field toggle ──────────────────────────────────────────────
       const getRelated = (): string[] => {
         const fm = this.app.metadataCache.getFileCache(activeFile)?.frontmatter;
-        if (!fm?.[field]) return [];
-        return Array.isArray(fm[field]) ? fm[field] : [String(fm[field])];
+        const val = fm?.[field];
+        if (!val) return [];
+        return Array.isArray(val) ? val.map(String) : [String(val)];
       };
 
       // ── Single button: add / remove frontmatter / faded warning for O or B ─
@@ -1034,7 +1036,7 @@ class LinkLinkView extends ItemView {
 
       linkBtn.addEventListener('click', async () => {
         if (isInFrontmatter) {
-          await this.app.fileManager.processFrontMatter(activeFile, fm => {
+          await this.app.fileManager.processFrontMatter(activeFile, (fm: Record<string, unknown>) => {
             const current = getRelated();
             const updated = current.filter(r => r !== `[[${file.basename}]]`);
             if (updated.length > 0) fm[field] = updated;
@@ -1044,7 +1046,7 @@ class LinkLinkView extends ItemView {
           isInFrontmatter = false;
           refreshBtn();
         } else {
-          await this.app.fileManager.processFrontMatter(activeFile, fm => {
+          await this.app.fileManager.processFrontMatter(activeFile, (fm: Record<string, unknown>) => {
             fm[field] = [...getRelated(), `[[${file.basename}]]`];
           });
           new Notice(`Added "${file.basename}" to ${field}:`);
@@ -1160,7 +1162,7 @@ class LinkLinkView extends ItemView {
         const isBacklink = entry?.isBacklink ?? false;
 
         if (isInFrontmatter) {
-          await this.app.fileManager.processFrontMatter(currentFile, fm => {
+          await this.app.fileManager.processFrontMatter(currentFile, (fm: Record<string, unknown>) => {
             const current = getRelated();
             const updated = current.filter(r => r !== `[[${f.basename}]]`);
             if (updated.length > 0) fm[field] = updated;
@@ -1169,7 +1171,7 @@ class LinkLinkView extends ItemView {
           this.simulation?.toggleNodeLink(f, isOutgoing || isBacklink);
           new Notice(`Removed "${f.basename}" from ${field}:`);
         } else {
-          await this.app.fileManager.processFrontMatter(currentFile, fm => {
+          await this.app.fileManager.processFrontMatter(currentFile, (fm: Record<string, unknown>) => {
             fm[field] = [...getRelated(), `[[${f.basename}]]`];
           });
           this.simulation?.toggleNodeLink(f, true);
@@ -1464,7 +1466,7 @@ export default class LinkLinkPlugin extends Plugin {
         const file = this.app.workspace.getActiveFile();
         if (!file) return false;
         if (checking) return true;
-        (async () => {
+        void (async () => {
           try {
             const index = await this.loadAnyIndex();
             const result = await this.interlinkService.runForFile(file, index);
@@ -1565,7 +1567,7 @@ export default class LinkLinkPlugin extends Plugin {
 
     this.addSettingTab(new LinkLinkSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
-      this.activateView();
+      void this.activateView();
       // Auto-index on startup (delayed to not block Obsidian loading)
       if (this.settings.autoIndexMode === 'startup' && this.settings.embeddingSource !== 'existing') {
         window.setTimeout(() => {
@@ -1586,7 +1588,7 @@ export default class LinkLinkPlugin extends Plugin {
 
   openFile(file: TFile) {
     const { openMode } = this.settings;
-    this.app.workspace.openLinkText(
+    void this.app.workspace.openLinkText(
       file.path, '',
       openMode === 'current' ? false : openMode === 'split' ? 'split' : true
     );
@@ -1599,7 +1601,7 @@ export default class LinkLinkPlugin extends Plugin {
       leaf = workspace.getRightLeaf(false) ?? workspace.getLeaf(true);
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
   }
 
   refreshView() {
@@ -1613,17 +1615,30 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   private static normalizeIndex(raw: string): IndexEntry[] {
-    const parsed = JSON.parse(raw);
+    type RawEntry = { path?: unknown; title?: unknown; embedding?: unknown; mtime?: unknown };
+    type DocsFormat = { docs?: { docs?: Record<string, RawEntry> } };
+
+    const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return (parsed as any[])
-        .filter(e => e.path && e.embedding)
-        .map(e => ({ path: e.path, title: e.title ?? e.path, embedding: e.embedding, mtime: e.mtime }));
+      return (parsed as RawEntry[])
+        .filter(e => typeof e.path === 'string' && Array.isArray(e.embedding))
+        .map(e => ({
+          path:      e.path as string,
+          title:     typeof e.title === 'string' ? e.title : (e.path as string),
+          embedding: e.embedding as number[],
+          mtime:     typeof e.mtime === 'number' ? e.mtime : undefined,
+        }));
     }
-    if (parsed?.docs?.docs && typeof parsed.docs.docs === 'object') {
+    const asDocs = parsed as DocsFormat;
+    if (asDocs?.docs?.docs && typeof asDocs.docs.docs === 'object') {
       const seen = new Map<string, IndexEntry>();
-      for (const d of Object.values(parsed.docs.docs) as any[]) {
-        if (!d.path || !d.embedding) continue;
-        if (!seen.has(d.path)) seen.set(d.path, { path: d.path, title: d.title ?? d.path, embedding: d.embedding });
+      for (const d of Object.values(asDocs.docs.docs)) {
+        if (typeof d.path !== 'string' || !Array.isArray(d.embedding)) continue;
+        if (!seen.has(d.path)) seen.set(d.path, {
+          path:      d.path,
+          title:     typeof d.title === 'string' ? d.title : d.path,
+          embedding: d.embedding as number[],
+        });
       }
       return [...seen.values()];
     }
@@ -1634,11 +1649,9 @@ export default class LinkLinkPlugin extends Plugin {
     const path = this.settings.existingIndexPath.trim();
     if (!path) throw new Error('Index file is not configured');
     const adapter = this.app.vault.adapter;
-    // @ts-ignore
     const stat = await adapter.stat(path);
     if (!stat) throw new Error('Index file is not configured');
     if (this.existingIndexCache && stat.mtime === this.existingIndexMtime) return this.existingIndexCache;
-    // @ts-ignore
     const raw = await adapter.read(path);
     this.existingIndexCache = LinkLinkPlugin.normalizeIndex(raw);
     this.existingIndexMtime = stat.mtime ?? 0;
@@ -1647,13 +1660,11 @@ export default class LinkLinkPlugin extends Plugin {
 
   async scanForIndexFiles(): Promise<{ path: string; format: string }[]> {
     const adapter = this.app.vault.adapter;
-    // @ts-ignore
     const listed = await adapter.list(this.app.vault.configDir);
     const results: { path: string; format: string }[] = [];
-    for (const filePath of listed.files as string[]) {
+    for (const filePath of listed.files) {
       if (!filePath.endsWith('.json')) continue;
       try {
-        // @ts-ignore
         const raw = await adapter.read(filePath);
         const parsed = JSON.parse(raw);
         if (parsed?.docs?.docs && typeof parsed.docs.docs === 'object') {
@@ -1802,8 +1813,8 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   async loadSettings() {
-    const rawData = await this.loadData();
-    const data: Record<string, any> = rawData ?? {};
+    const rawData = await this.loadData() as Record<string, unknown> | null;
+    const data: Record<string, unknown> = rawData ?? {};
     if (data.embeddingSource === 'copilot') {
       data.embeddingSource = 'existing';
       data.existingIndexPath = '';
@@ -1899,7 +1910,7 @@ function filterSection(
     new PathSuggestModal(app, (path) => {
       if (!values.includes(path)) {
         values.push(path);
-        onChange([...values]).then(() => renderChips());
+        void onChange([...values]).then(() => renderChips());
       }
     }).open();
   });
@@ -2037,9 +2048,9 @@ class SetupWizardModal extends Modal {
     const ex = this.chosenModel === 'existing';
     if      (this.step === 0) this.renderWelcome(body);
     else if (this.step === 1) this.renderModel(body);
-    else if (this.step === 2) ex ? this.renderIndexFile(body) : this.renderTargeting(body);
-    else if (this.step === 3) ex ? this.renderInterlink(body) : this.renderIndex(body);
-    else if (this.step === 4) ex ? this.renderDone(body)      : this.renderInterlink(body);
+    else if (this.step === 2) { if (ex) this.renderIndexFile(body); else this.renderTargeting(body); }
+    else if (this.step === 3) { if (ex) this.renderInterlink(body); else this.renderIndex(body); }
+    else if (this.step === 4) { if (ex) this.renderDone(body);      else this.renderInterlink(body); }
     else                           this.renderDone(body);
   }
 
@@ -2272,7 +2283,7 @@ class SetupWizardModal extends Modal {
     if (S.existingIndexPath) readyNote.setText('✓ Index file ready — no additional indexing needed.');
 
     new Setting(body).setName('Index file path').addText(t => {
-      t.setPlaceholder('.obsidian/<path-to-your-index-file>').setValue(S.existingIndexPath)
+      t.setPlaceholder(`${this.app.vault.configDir}/<path-to-your-index-file>`).setValue(S.existingIndexPath)
        .onChange(async v => {
          S.existingIndexPath = v;
          detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
@@ -2288,10 +2299,10 @@ class SetupWizardModal extends Modal {
       try { const found = await this.plugin.scanForIndexFiles(); renderDetected(found); S.detectedIndexFiles = found; await this.save(); return found; }
       finally { scanBtn.disabled = false; scanBtn.querySelector('span:last-child')!.textContent = 'Scan'; }
     };
-    scanBtn.addEventListener('click', () => runScan());
+    scanBtn.addEventListener('click', () => { void runScan(); });
 
     if (S.detectedIndexFiles.length > 0) renderDetected(S.detectedIndexFiles);
-    else if (!S.existingIndexPath) runScan();
+    else if (!S.existingIndexPath) void runScan();
     else detectedList.createEl('p', { text: 'Press Scan to detect index files.', cls: 'll-detected-empty' });
 
     // Footer always last so it renders below all content
@@ -2621,8 +2632,9 @@ class SetupWizardModal extends Modal {
         const graphRow = doneWrap.createEl('div', { cls: 'll-wiz-graph-row' });
         graphRow.createEl('span', { text: 'Open Graph View to see your vault\'s new connected state.', cls: 'll-wiz-done-desc' });
         const graphBtn = graphRow.createEl('button', { text: 'Open Graph View', cls: 'll-action-btn ll-action-btn-secondary' });
-        // @ts-ignore
-        graphBtn.addEventListener('click', () => this.app.commands.executeCommandById('graph:open'));
+        graphBtn.addEventListener('click', () => {
+          (this.app as unknown as { commands: { executeCommandById: (id: string) => unknown } }).commands.executeCommandById('graph:open');
+        });
         skipBtn.setCssStyles({ display: 'none' });
         const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
         nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
@@ -2658,13 +2670,12 @@ class SetupWizardModal extends Modal {
     const settBtn = footerRow.createEl('button', { text: 'Open Settings', cls: 'll-action-btn ll-action-btn-secondary' });
     settBtn.addEventListener('click', () => {
       this.close();
-      // @ts-ignore
-      this.app.setting.open();
-      // @ts-ignore
-      this.app.setting.openTabById('link-link');
+      const setting = (this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting;
+      setting.open();
+      setting.openTabById('link-link');
     });
     const panelBtn = footerRow.createEl('button', { text: 'Open related notes panel', cls: 'll-action-btn ll-action-btn-accent' });
-    panelBtn.addEventListener('click', () => { this.close(); this.plugin.activateView(); });
+    panelBtn.addEventListener('click', () => { this.close(); void this.plugin.activateView(); });
   }
 }
 
@@ -2771,7 +2782,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       });
       setIcon(btn, 'rotate-ccw');
       btn.addEventListener('click', async () => {
-        (S as any)[key] = (DEFAULT_SETTINGS as any)[key];
+        (S as Record<keyof LinkLinkSettings, unknown>)[key] = DEFAULT_SETTINGS[key];
         await save();
         const scroller = containerEl.closest('.vertical-tab-content') as HTMLElement | null;
         const scrollTop = scroller?.scrollTop ?? 0;
@@ -2787,7 +2798,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const s = new Setting(parent).setName(name).setDesc(desc)
         .addSlider(sl => sl.setLimits(min, max, step)
           .setValue(S[key] as number).setDynamicTooltip()
-          .onChange(async v => { (S as any)[key] = v; await save(); }));
+          .onChange(async v => { (S as Record<keyof LinkLinkSettings, unknown>)[key] = v; await save(); }));
       addReset(s, key);
       return s;
     };
@@ -2821,13 +2832,15 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const helpBtn = embSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
       const tip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
       this.tooltipEl = tip;
-      tip.innerHTML = `
-        <div class="ll-tip-item"><div class="ll-tip-title">Built-in (lightweight)</div>
-          <div class="ll-tip-body">A compact model shipped with the plugin. Runs fully offline with no downloads required.</div></div>
-        <div class="ll-tip-item"><div class="ll-tip-title">Local model (Ollama)</div>
-          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>
-        <div class="ll-tip-item"><div class="ll-tip-title">Existing index file</div>
-          <div class="ll-tip-body">Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.</div></div>`;
+      for (const [title, body] of [
+        ['Built-in (lightweight)', 'A compact model shipped with the plugin. Runs fully offline with no downloads required.'],
+        ['Local model (Ollama)',   'Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.'],
+        ['Existing index file',   'Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.'],
+      ] as [string, string][]) {
+        const item = tip.createEl('div', { cls: 'll-tip-item' });
+        item.createEl('div', { text: title, cls: 'll-tip-title' });
+        item.createEl('div', { text: body,  cls: 'll-tip-body' });
+      }
       helpBtn.addEventListener('mouseenter', () => {
         const r = helpBtn.getBoundingClientRect();
         tip.setCssStyles({ top: r.bottom + 6 + 'px' });
@@ -2846,7 +2859,6 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const link = info.createEl('a', { text: 'View on HuggingFace →', cls: 'll-model-info-link' });
         link.addEventListener('click', (e) => {
           e.preventDefault();
-          // @ts-ignore
           window.open('https://huggingface.co/Xenova/bge-small-en-v1.5', '_blank');
         });
       } else if (S.embeddingSource === 'local') {
@@ -3050,7 +3062,6 @@ class LinkLinkSettingTab extends PluginSettingTab {
           const adapter = this.plugin.app.vault.adapter;
           const alive: { path: string; format: string }[] = [];
           for (const f of S.detectedIndexFiles) {
-            // @ts-ignore
             if (await adapter.exists(f.path)) alive.push(f);
           }
           if (alive.length !== S.detectedIndexFiles.length) {
@@ -3075,7 +3086,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         new Setting(body)
           .setName('Index file path')
           .addText(t => {
-            t.setPlaceholder('.obsidian/<path-to-your-index-file>')
+            t.setPlaceholder(`${this.app.vault.configDir}/<path-to-your-index-file>`)
              .setValue(S.existingIndexPath)
              .onChange(async v => {
                S.existingIndexPath = v;
@@ -3172,27 +3183,34 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const autoIdxHelpBtn = autoIdxSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
         const autoIdxTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
         this.autoIndexTipEl = autoIdxTip;
-        autoIdxTip.innerHTML = `
-          <div class="ll-tip-item">
-            <div class="ll-tip-title">Only manually</div>
-            <div class="ll-tip-body">You control when the indexer runs. No background activity.<br>
-              ✦ Zero performance impact<br>
-              ✦ Predictable — nothing runs unless you ask<br>
-              ✗ Index might go stale in the background; new or edited notes won't appear in results until you re-index</div>
-          </div>
-          <div class="ll-tip-item">
-            <div class="ll-tip-title">On startup <span style="font-weight:400;color:var(--text-muted)">(recommended)</span></div>
-            <div class="ll-tip-body">Indexer runs once when Obsidian opens, then stays out of the way.<br>
-              ✦ Index is always fresh at the start of each session<br>
-              ✦ No impact during your work<br>
-              ✗ Notes edited between sessions are stale until next restart or manual re-indexing</div>
-          </div>
-          <div class="ll-tip-item">
-            <div class="ll-tip-title">On file save</div>
-            <div class="ll-tip-body">Indexes notes a few seconds after a file save.<br>
-              ✦ Results stay continuously current<br>
-              ✗ Light background processing after each save; may be noticeable on large vaults or slow machines</div>
-          </div>`;
+        const mkTipLines = (el: HTMLElement, lines: string[]) => {
+          lines.forEach((line, i) => { if (i > 0) el.createEl('br'); el.appendText(line); });
+        };
+        { const item = autoIdxTip.createEl('div', { cls: 'll-tip-item' });
+          item.createEl('div', { text: 'Only manually', cls: 'll-tip-title' });
+          mkTipLines(item.createEl('div', { cls: 'll-tip-body' }), [
+            'You control when the indexer runs. No background activity.',
+            '✦ Zero performance impact',
+            '✦ Predictable — nothing runs unless you ask',
+            '✗ Index might go stale in the background; new or edited notes won\'t appear in results until you re-index',
+          ]); }
+        { const item = autoIdxTip.createEl('div', { cls: 'll-tip-item' });
+          const title = item.createEl('div', { cls: 'll-tip-title' });
+          title.appendText('On startup ');
+          title.createEl('span', { text: '(recommended)' }).setCssStyles({ fontWeight: '400', color: 'var(--text-muted)' });
+          mkTipLines(item.createEl('div', { cls: 'll-tip-body' }), [
+            'Indexer runs once when Obsidian opens, then stays out of the way.',
+            '✦ Index is always fresh at the start of each session',
+            '✦ No impact during your work',
+            '✗ Notes edited between sessions are stale until next restart or manual re-indexing',
+          ]); }
+        { const item = autoIdxTip.createEl('div', { cls: 'll-tip-item' });
+          item.createEl('div', { text: 'On file save', cls: 'll-tip-title' });
+          mkTipLines(item.createEl('div', { cls: 'll-tip-body' }), [
+            'Indexes notes a few seconds after a file save.',
+            '✦ Results stay continuously current',
+            '✗ Light background processing after each save; may be noticeable on large vaults or slow machines',
+          ]); }
         autoIdxHelpBtn.addEventListener('mouseenter', () => {
           const r = autoIdxHelpBtn.getBoundingClientRect();
           autoIdxTip.setCssStyles({ top: r.bottom + 6 + 'px' });
@@ -3221,17 +3239,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const mtimeHelpBtn = mtimeSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
         const mtimeTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
         this.mtimeTipEl = mtimeTip;
-        mtimeTip.innerHTML = `
-          <div class="ll-tip-item">
-            <div class="ll-tip-body">
-              The index command compares a modification timestamp to skip unchanged notes.<br><br>
-              OS timestamp is the default signal, but keep in mind: sync tools such as Dropbox,
-              iCloud, and others may overwrite it on transfer. If you have your modified timestamp
-              stored in a custom frontmatter field, you can use it instead of the OS timestamp.<br><br>
-              If the custom field is absent or unreadable, the OS timestamp is used as a fallback
-              so notes without the field still get reliable change detection.
-            </div>
-          </div>`;
+        { const item = mtimeTip.createEl('div', { cls: 'll-tip-item' });
+          const b = item.createEl('div', { cls: 'll-tip-body' });
+          b.appendText('The index command compares a modification timestamp to skip unchanged notes.');
+          b.createEl('br'); b.createEl('br');
+          b.appendText('OS timestamp is the default signal, but keep in mind: sync tools such as Dropbox, iCloud, and others may overwrite it on transfer. If you have your modified timestamp stored in a custom frontmatter field, you can use it instead of the OS timestamp.');
+          b.createEl('br'); b.createEl('br');
+          b.appendText('If the custom field is absent or unreadable, the OS timestamp is used as a fallback so notes without the field still get reliable change detection.'); }
         mtimeHelpBtn.addEventListener('mouseenter', () => {
           const r = mtimeHelpBtn.getBoundingClientRect();
           mtimeTip.setCssStyles({ top: r.bottom + 6 + 'px' });
@@ -3271,18 +3285,16 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const progDispHelpBtn = progDispSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
         const progDispTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
         this.progressDisplayTipEl = progDispTip;
-        progDispTip.innerHTML = `
-          <div class="ll-tip-item">
-            <div class="ll-tip-body">Indexing a large vault can make Obsidian feel sluggish for a bit. Pick how you'd like to follow along — or just let it run quietly in the background.</div>
-          </div>
-          <div class="ll-tip-item">
-            <div class="ll-tip-title">Pop-up window</div>
-            <div class="ll-tip-body">Completion summary stays open until you close it.</div>
-          </div>
-          <div class="ll-tip-item">
-            <div class="ll-tip-title">Obsidian notifications &amp; Silent</div>
-            <div class="ll-tip-body">Show a brief completion summary for a few seconds.</div>
-          </div>`;
+        progDispTip.createEl('div', { cls: 'll-tip-item' })
+          .createEl('div', { text: 'Indexing a large vault can make Obsidian feel sluggish for a bit. Pick how you\'d like to follow along — or just let it run quietly in the background.', cls: 'll-tip-body' });
+        for (const [title, body] of [
+          ['Pop-up window',                    'Completion summary stays open until you close it.'],
+          ['Obsidian notifications & Silent',  'Show a brief completion summary for a few seconds.'],
+        ] as [string, string][]) {
+          const item = progDispTip.createEl('div', { cls: 'll-tip-item' });
+          item.createEl('div', { text: title, cls: 'll-tip-title' });
+          item.createEl('div', { text: body,  cls: 'll-tip-body' });
+        }
         progDispHelpBtn.addEventListener('mouseenter', () => {
           const r = progDispHelpBtn.getBoundingClientRect();
           progDispTip.setCssStyles({ top: r.bottom + 6 + 'px' });
@@ -3393,7 +3405,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 'progressDisplay', 'notificationTimeout',
                 'indexMode',
               ];
-              for (const k of keys) (S as any)[k] = (DEFAULT_SETTINGS as any)[k];
+              const sr = S as Record<keyof LinkLinkSettings, unknown>;
+              for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
               S.excludePaths = []; S.includePaths = [];
               await save();
               body.empty();
@@ -3615,7 +3628,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
             const keys: (keyof LinkLinkSettings)[] = [
               'topN', 'threshold', 'relatedFieldName',
             ];
-            for (const k of keys) (S as any)[k] = (DEFAULT_SETTINGS as any)[k];
+            const sr = S as Record<keyof LinkLinkSettings, unknown>;
+            for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
             S.ignoredPaths = []; S.readOnlyPaths = [];
             await save();
             body.empty();
@@ -3693,7 +3707,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
               'textFadeThreshold', 'nodeSizeMultiplier', 'lineSizeMultiplier',
               'centerStrength', 'repelStrength', 'linkStrength', 'linkDistance',
             ];
-            for (const k of keys) (S as any)[k] = (DEFAULT_SETTINGS as any)[k];
+            const sr = S as Record<keyof LinkLinkSettings, unknown>;
+            for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
             await save();
             body.empty();
             renderGraph();
