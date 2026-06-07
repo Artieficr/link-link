@@ -112,9 +112,12 @@ interface GNode {
   fx: number; fy: number;
   pinned: boolean;
   linked: boolean;
+  isOutgoing: boolean; // outgoing link: body-text wiki link from current note to this node
+  isBacklink: boolean; // this node's file links to the current note
 }
 
 interface GEdge { a: number; b: number; }
+type ResultEntry = { file: TFile; score: number; isOutgoing: boolean; isBacklink: boolean };
 
 class EmbeddingNotFoundError extends Error {
   constructor(
@@ -139,6 +142,19 @@ function scoreToColor(score: number, s: LinkLinkSettings, minScore = 0, maxScore
   if (rel >= 2 / 3) return s.colorHigh;
   if (rel >= 1 / 3) return s.colorMid;
   return s.colorLow;
+}
+
+// Fixed-position tooltip for list items (avoids overflow-y:auto clipping).
+// Returns a cleanup function; caller must call it on mouseleave.
+function showListTip(anchor: HTMLElement, title: string, body: string, align: 'left' | 'right' = 'left'): () => void {
+  const tip = document.body.createEl('div', { cls: 'll-list-tip' });
+  tip.createEl('strong', { text: title, cls: 'll-list-tip-title' });
+  tip.createEl('span',   { text: body,  cls: 'll-list-tip-body' });
+  const r = anchor.getBoundingClientRect();
+  tip.style.top = (r.bottom + 4) + 'px';
+  if (align === 'right') tip.style.right = (window.innerWidth - r.right) + 'px';
+  else                   tip.style.left  = r.left + 'px';
+  return () => tip.remove();
 }
 
 function contrastColor(hex: string): string {
@@ -189,7 +205,7 @@ class GraphSimulation {
   private panStartY = 0;
 
   private onOpen: (file: TFile) => void;
-  private onInsertLink: (file: TFile) => void;
+  private onInsertLink: (file: TFile, dropTarget: Element | null, dropX: number, dropY: number) => void;
   private onContextMenu: (file: TFile, event: MouseEvent) => void;
   private onToggleRelated: (file: TFile) => Promise<void>;
   private isHoveringCenter = false;
@@ -199,11 +215,11 @@ class GraphSimulation {
     canvas: HTMLCanvasElement,
     panelEl: HTMLElement,
     currentFile: TFile,
-    results: { file: TFile; score: number }[],
+    results: ResultEntry[],
     linkedPaths: Set<string>,
     settings: LinkLinkSettings,
     onOpen: (file: TFile) => void,
-    onInsertLink: (file: TFile) => void,
+    onInsertLink: (file: TFile, dropTarget: Element | null, dropX: number, dropY: number) => void,
     onContextMenu: (file: TFile, event: MouseEvent) => void,
     onToggleRelated: (file: TFile) => Promise<void>
   ) {
@@ -228,14 +244,15 @@ class GraphSimulation {
     this.nodes.push({
       file: currentFile, score: 1,
       x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0,
-      pinned: true, linked: false
+      pinned: true, linked: false, isOutgoing: false, isBacklink: false
     });
     for (let i = 0; i < results.length; i++) {
       const isLinked = linkedPaths.has(results[i].file.path);
       this.nodes.push({
         file: results[i].file, score: results[i].score,
         x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0,
-        pinned: false, linked: isLinked
+        pinned: false, linked: isLinked,
+        isOutgoing: results[i].isOutgoing, isBacklink: results[i].isBacklink
       });
       if (isLinked) this.edges.push({ a: 0, b: this.nodes.length - 1 });
     }
@@ -310,6 +327,15 @@ class GraphSimulation {
       if (!this.edges.some(e => e.b === idx)) this.edges.push({ a: 0, b: idx });
     } else {
       this.edges = this.edges.filter(e => e.b !== idx);
+    }
+  }
+
+  updateNodeFlags(flags: Map<string, { isOutgoing: boolean; isBacklink: boolean }>) {
+    for (const node of this.nodes.slice(1)) {
+      if (!node.file) continue;
+      const f = flags.get(node.file.path);
+      node.isOutgoing = f?.isOutgoing ?? false;
+      node.isBacklink = f?.isBacklink ?? false;
     }
   }
 
@@ -452,7 +478,7 @@ class GraphSimulation {
       this.ghostEl?.remove(); this.ghostEl = null;
       const el = document.elementFromPoint(e.clientX, e.clientY);
       if (el?.closest('.cm-editor, .cm-content, .CodeMirror, .markdown-source-view')) {
-        this.onInsertLink(this.dragFile);
+        this.onInsertLink(this.dragFile, el, e.clientX, e.clientY);
       }
     } else if (this.isHoveringCenter && this.dragFile && this.dragNode !== this.nodes[0]) {
       this.onToggleRelated(this.dragFile);
@@ -594,6 +620,20 @@ class GraphSimulation {
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fillStyle = fill; ctx.fill();
 
+      // Draw O/outgoing (vertical) / B/backlink (horizontal) marker lines inside node
+      if (!n.pinned && (n.isOutgoing || n.isBacklink)) {
+        const bgColor = getComputedStyle(document.body).getPropertyValue('--background-primary').trim() || (this.dark ? '#1e1e1e' : '#ffffff');
+        ctx.strokeStyle = bgColor;
+        ctx.lineWidth   = 1.5 / this.scale;
+        const arm = r * 0.58;
+        if (n.isOutgoing) {
+          ctx.beginPath(); ctx.moveTo(n.x, n.y - arm); ctx.lineTo(n.x, n.y + arm); ctx.stroke();
+        }
+        if (n.isBacklink) {
+          ctx.beginPath(); ctx.moveTo(n.x - arm, n.y); ctx.lineTo(n.x + arm, n.y); ctx.stroke();
+        }
+      }
+
       if (textAlpha <= 0) continue;
       const name = n.file?.basename ?? '';
       if (!name) continue;
@@ -617,6 +657,7 @@ class LinkLinkView extends ItemView {
   plugin: LinkLinkPlugin;
   private simulation: GraphSimulation | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private listUpdateFn: ((outgoingPaths: Set<string>, backlinkPaths: Set<string>) => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: LinkLinkPlugin) {
     super(leaf); this.plugin = plugin;
@@ -631,11 +672,13 @@ class LinkLinkView extends ItemView {
   async onClose() {
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.simulation?.stop();          this.simulation = null;
+    this.listUpdateFn = null;
   }
 
   async refresh() {
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.simulation?.stop();          this.simulation = null;
+    this.listUpdateFn = null;
 
     const el = this.contentEl;
     el.empty();
@@ -649,17 +692,23 @@ class LinkLinkView extends ItemView {
     el.createEl('p', { text: 'Loading…', cls: 'll-loading' });
 
     try {
-      let results = await this.plugin.getRelated(activeFile);
+      // Compute natural connections first so they don't consume Top N slots
+      const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(activeFile);
+      const naturalPaths = new Set([...outgoingPaths, ...backlinkPaths]);
+      const baseResults = await this.plugin.getRelated(activeFile, naturalPaths);
       el.empty(); el.addClass('ll-container');
 
       const header  = el.createEl('div', { cls: 'll-header' });
       const isGraph = this.plugin.settings.viewMode === 'graph';
 
-      // Graph always shows linked notes regardless of threshold
-      if (isGraph) {
-        const extra = await this.plugin.getLinkedResults(activeFile, results);
-        if (extra.length > 0) results = [...results, ...extra];
-      }
+      // Always show linked notes regardless of Top N / threshold
+      const extra = await this.plugin.getLinkedResults(activeFile, baseResults);
+      const allResults = extra.length > 0 ? [...baseResults, ...extra] : baseResults;
+      const results: ResultEntry[] = allResults.map(r => ({
+        ...r,
+        isOutgoing: outgoingPaths.has(r.file.path),
+        isBacklink: backlinkPaths.has(r.file.path),
+      }));
 
       const mkIconBtn = (
         parent: HTMLElement,
@@ -671,17 +720,21 @@ class LinkLinkView extends ItemView {
       ) => {
         const btn = parent.createEl('div', { cls: 'll-icon-btn' });
         setIcon(btn, icon);
-        const tip = btn.createEl('div', { cls: 'll-icon-btn-tip' + (tipAlign === 'left' ? ' ll-icon-btn-tip-left' : '') });
-        tip.createEl('strong', { text: tipTitle, cls: 'll-icon-btn-tip-title' });
-        tip.createEl('span',   { text: tipBody });
+        // Fixed-position tooltip so button's hover opacity doesn't cascade into it
+        let hideTip: (() => void) | null = null;
+        btn.addEventListener('mouseenter', () => {
+          hideTip = showListTip(btn, tipTitle, tipBody, tipAlign);
+        });
+        btn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
         btn.addEventListener('click', async () => {
+          hideTip?.(); hideTip = null;
           btn.addClass('ll-icon-btn-busy');
           try { await onClick(); } finally { btn.removeClass('ll-icon-btn-busy'); }
         });
         return btn;
       };
 
-      mkIconBtn(header, 'link', 'Interlink Current Note',
+      mkIconBtn(header, 'link', 'Interlink current note',
         'Update related links for this note only. Other notes stay untouched.',
         'left',
         async () => {
@@ -699,24 +752,18 @@ class LinkLinkView extends ItemView {
       header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
       const controls = header.createEl('div', { cls: 'll-controls' });
 
-      mkIconBtn(controls, 'git-branch', 'Interlink Vault',
-        'Update related links for every note in the vault at once.',
+      mkIconBtn(controls, 'refresh-cw', 'Update panel',
+        this.plugin.settings.embeddingSource === 'copilot'
+          ? 'Refresh the panel to pick up recent changes.'
+          : 'Re-index this note and refresh the panel to pick up recent changes.',
         'right',
         async () => {
-          new ConfirmModal(
-            this.app,
-            'Interlink Vault?',
-            'This will write a related: field to every note in your vault, connecting each one to its most semantically similar notes. Existing related: fields will be replaced. Notes in ignored or read-only paths are left untouched.',
-            async () => {
-              const { onProgress, onDone, onError } = this.plugin.createProgressDisplay();
-              try {
-                const index = await this.plugin.loadAnyIndex();
-                const { updated } = await this.plugin.interlinkService.run(index, onProgress);
-                onDone(`Interlinked vault — updated ${updated} notes.`);
-              } catch (e) { onError(); new Notice(`Error: ${e instanceof Error ? e.message : String(e)}`); }
-            },
-            'Interlink'
-          ).open();
+          try {
+            if (this.plugin.settings.embeddingSource !== 'copilot') {
+              await this.plugin.indexingService.index(() => {}, [activeFile]);
+            }
+            await this.refresh();
+          } catch (e) { new Notice(`Update failed: ${e instanceof Error ? e.message : String(e)}`); }
         }
       );
 
@@ -752,6 +799,37 @@ class LinkLinkView extends ItemView {
       } else {
         el.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
       }
+    }
+  }
+
+  // Inserts [[link]] at the visual drop coordinates using CM6's posAtCoords,
+  // falling back to the current cursor position if the internal API is unavailable.
+  private insertLinkAtDrop(text: string, dropTarget: Element | null, dropX: number, dropY: number) {
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) continue;
+      if (dropTarget && !view.containerEl.contains(dropTarget)) continue;
+      const editor = view.editor;
+      // @ts-ignore — CM6 internal EditorView, used to convert screen coords to doc offset
+      const cm = editor.cm;
+      if (cm?.posAtCoords) {
+        const offset = cm.posAtCoords({ x: dropX, y: dropY }, false);
+        if (typeof offset === 'number') editor.setCursor(editor.offsetToPos(offset));
+      }
+      editor.replaceSelection(text);
+      return;
+    }
+    new Notice('Open a note first, then drop the link.');
+  }
+
+  updateBadges(activeFile: TFile) {
+    const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(activeFile);
+    this.listUpdateFn?.(outgoingPaths, backlinkPaths);
+    if (this.simulation) {
+      const flags = new Map<string, { isOutgoing: boolean; isBacklink: boolean }>();
+      for (const p of outgoingPaths) flags.set(p, { isOutgoing: true,  isBacklink: backlinkPaths.has(p) });
+      for (const p of backlinkPaths) if (!flags.has(p)) flags.set(p, { isOutgoing: false, isBacklink: true });
+      this.simulation.updateNodeFlags(flags);
     }
   }
 
@@ -849,7 +927,7 @@ class LinkLinkView extends ItemView {
     }
   }
 
-  private renderList(el: HTMLElement, results: { file: TFile; score: number }[], activeFile: TFile) {
+  private renderList(el: HTMLElement, results: ResultEntry[], activeFile: TFile) {
     const wrap = el.createEl('div', { cls: 'll-list-wrap' });
     const list = wrap.createEl('div', { cls: 'll-list' });
     const scores = results.map(r => r.score).filter(s => s > 0);
@@ -858,14 +936,44 @@ class LinkLinkView extends ItemView {
     const field = this.plugin.settings.relatedFieldName || 'related';
 
     let dragGhost: HTMLElement | null = null;
+    const itemUpdaters: Array<(outgoingPaths: Set<string>, backlinkPaths: Set<string>) => void> = [];
 
-    for (const { file, score } of results) {
+    for (const { file, score, isOutgoing: initIsOutgoing, isBacklink: initIsBacklink } of results) {
+      let isOutgoing = initIsOutgoing;
+      let isBacklink = initIsBacklink;
+
       const item    = list.createEl('div', { cls: 'll-item' });
       const scoreEl = item.createEl('span', { cls: 'll-score' });
-      scoreEl.setText(score.toFixed(2));
-      const bg = scoreToColor(score, this.plugin.settings, minScore, maxScore);
-      scoreEl.style.background = bg;
-      scoreEl.style.color      = contrastColor(bg);
+      if (score > 0) {
+        scoreEl.setText(score.toFixed(2));
+        const bg = scoreToColor(score, this.plugin.settings, minScore, maxScore);
+        scoreEl.style.background = bg;
+        scoreEl.style.color      = contrastColor(bg);
+      } else {
+        scoreEl.setText('?');
+        scoreEl.title            = 'Unindexed';
+        scoreEl.style.background = 'var(--background-modifier-border)';
+        scoreEl.style.color      = 'var(--text-muted)';
+      }
+
+      // O (outgoing) always before B (backlink); pre-created for in-place updates
+      const badgeO = item.createEl('span', { cls: 'll-ref-badge', text: 'O' });
+      const badgeB = item.createEl('span', { cls: 'll-ref-badge', text: 'B' });
+      const renderBadges = () => {
+        badgeO.style.display = isOutgoing ? '' : 'none';
+        badgeB.style.display = isBacklink ? '' : 'none';
+      };
+      renderBadges();
+
+      // Shared tip handle per row — one visible tip at a time
+      let hideTip: (() => void) | null = null;
+      const attachTip = (el: HTMLElement, title: string, body: string) => {
+        el.addEventListener('mouseenter', () => { hideTip?.(); hideTip = showListTip(el, title, body); });
+        el.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
+      };
+      attachTip(badgeO, 'Outgoing link', 'This note is referenced in the current note\'s body text.');
+      attachTip(badgeB, 'Backlink',      'The current note is referenced in this note\'s body text.');
+
       item.createEl('span', { text: file.basename, cls: 'll-link' })
         .addEventListener('contextmenu', (e) => {
           e.preventDefault();
@@ -881,111 +989,134 @@ class LinkLinkView extends ItemView {
         return Array.isArray(fm[field]) ? fm[field] : [String(fm[field])];
       };
 
+      // ── Single button: add / remove frontmatter / faded warning for O or B ─
       const linkBtn = item.createEl('button', { cls: 'll-item-link-btn' });
-      let linked = getRelated().some(r => r === `[[${file.basename}]]`);
+      let isInFrontmatter = getRelated().some(r => r === `[[${file.basename}]]`);
 
       const refreshBtn = () => {
         linkBtn.empty();
-        setIcon(linkBtn, linked ? 'unlink' : 'link');
-        linkBtn.toggleClass('is-connected', linked);
-        linkBtn.title = linked ? `Remove from ${field}:` : `Add to ${field}:`;
+        if (isInFrontmatter) {
+          setIcon(linkBtn, 'unlink');
+          linkBtn.toggleClass('is-connected', true);
+          linkBtn.toggleClass('is-natural', false);
+        } else {
+          setIcon(linkBtn, 'link');
+          linkBtn.toggleClass('is-connected', false);
+          linkBtn.toggleClass('is-natural', isOutgoing || isBacklink);
+        }
       };
       refreshBtn();
 
-      linkBtn.addEventListener('click', async () => {
-        if (linked) {
-          // Block removal if the note is referenced directly in the body text
-          const bodyLinks = this.app.metadataCache.getFileCache(activeFile)?.links ?? [];
-          const isBodyRef = bodyLinks.some(l =>
-            this.app.metadataCache.getFirstLinkpathDest(l.link, activeFile.path)?.path === file.path
-          );
-          if (isBodyRef) {
-            new Notice(
-              `"${file.basename}" is referenced directly in the note body. Remove the [[link]] from the text first.`,
-              6000
-            );
-            return;
-          }
-        }
+      linkBtn.addEventListener('mouseenter', () => {
+        hideTip?.();
+        hideTip = showListTip(linkBtn,
+          isInFrontmatter ? `Remove from ${field}:` : `Add to ${field}:`,
+          isInFrontmatter
+            ? `Remove "${file.basename}" from the ${field} frontmatter field.`
+            : `Add "${file.basename}" to the ${field} frontmatter field.`,
+          'right'
+        );
+      });
+      linkBtn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
 
-        await this.app.fileManager.processFrontMatter(activeFile, fm => {
-          const current = getRelated();
-          if (linked) {
+      linkBtn.addEventListener('click', async () => {
+        if (isInFrontmatter) {
+          await this.app.fileManager.processFrontMatter(activeFile, fm => {
+            const current = getRelated();
             const updated = current.filter(r => r !== `[[${file.basename}]]`);
             if (updated.length > 0) fm[field] = updated;
             else delete fm[field];
-          } else {
-            fm[field] = [...current, `[[${file.basename}]]`];
-          }
-        });
+          });
+          new Notice(`Removed "${file.basename}" from ${field}:`);
+          isInFrontmatter = false;
+          refreshBtn();
+        } else {
+          await this.app.fileManager.processFrontMatter(activeFile, fm => {
+            fm[field] = [...getRelated(), `[[${file.basename}]]`];
+          });
+          new Notice(`Added "${file.basename}" to ${field}:`);
+          isInFrontmatter = true;
+          refreshBtn();
+        }
+      });
 
-        new Notice(linked ? `Removed "${file.basename}" from ${field}:` : `Added "${file.basename}" to ${field}:`);
-        linked = !linked; // flip directly — metadata cache lags behind the write
+      // Per-item updater for real-time badge/button refresh via metadataCache.changed
+      itemUpdaters.push((newOutgoingPaths: Set<string>, newBacklinkPaths: Set<string>) => {
+        isOutgoing = newOutgoingPaths.has(file.path);
+        isBacklink = newBacklinkPaths.has(file.path);
+        isInFrontmatter = getRelated().some(r => r === `[[${file.basename}]]`);
+        renderBadges();
         refreshBtn();
       });
 
-      // ── Drag to insert [[link]] — whole row is the drag handle ────────────
-      let startX = 0, startY = 0, isDragging = false, captureActive = false;
+      // ── Click to open, drag to insert [[link]] ───────────────────────────
+      // click handles opens; pointerdown/move/up on document handles drag.
+      // Keeping e.preventDefault() off pointerdown so click fires naturally
+      // (preventDefault suppresses click in Chromium/Electron).
+      // user-select: none on .ll-item prevents text selection instead.
+      let wasDragged = false;
+
+      item.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('.ll-item-link-btn')) return;
+        if (wasDragged) { wasDragged = false; return; }
+        this.plugin.openFile(file);
+      });
 
       item.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         if ((e.target as HTMLElement).closest('.ll-item-link-btn')) return;
-        e.preventDefault();
-        item.setPointerCapture(e.pointerId);
-        captureActive = true;
-        startX = e.clientX; startY = e.clientY;
-        isDragging = false;
-      });
 
-      item.addEventListener('pointermove', (e) => {
-        if (!item.hasPointerCapture(e.pointerId)) return;
-        if (!isDragging && (e.clientX - startX) ** 2 + (e.clientY - startY) ** 2 > 64) {
-          isDragging = true;
-          dragGhost?.remove();
-          dragGhost = document.body.createEl('div', { cls: 'll-drag-ghost' });
-          dragGhost.setText(`[[${file.basename}]]`);
-          item.style.cursor = 'grabbing';
-        }
-        if (dragGhost) {
-          dragGhost.style.left = e.clientX + 'px';
-          dragGhost.style.top  = e.clientY + 'px';
-        }
-      });
+        let isDragging = false;
+        const startX = e.clientX, startY = e.clientY;
 
-      const endDrag = (e: PointerEvent) => {
-        if (!captureActive) return;
-        captureActive = false;
-        item.style.cursor = '';
-        if (isDragging) {
-          dragGhost?.remove(); dragGhost = null;
-          const target = document.elementFromPoint(e.clientX, e.clientY);
-          if (target?.closest('.cm-editor, .cm-content, .CodeMirror, .markdown-source-view')) {
-            let ed = this.app.workspace.activeEditor?.editor;
-            if (!ed) {
-              for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-                if (leaf.view instanceof MarkdownView) { ed = leaf.view.editor; break; }
-              }
-            }
-            if (ed) ed.replaceSelection(`[[${file.basename}]]`);
-            else    new Notice('Open a note first, then drop the link.');
+        const onMove = (me: PointerEvent) => {
+          if (!isDragging && (me.clientX - startX) ** 2 + (me.clientY - startY) ** 2 > 64) {
+            isDragging = true;
+            wasDragged = true;
+            dragGhost?.remove();
+            dragGhost = document.body.createEl('div', { cls: 'll-drag-ghost' });
+            dragGhost.setText(`[[${file.basename}]]`);
+            item.style.cursor = 'grabbing';
           }
-        } else {
-          this.plugin.openFile(file);
-        }
-        isDragging = false;
-        dragGhost?.remove(); dragGhost = null;
-      };
+          if (dragGhost) {
+            dragGhost.style.left = me.clientX + 'px';
+            dragGhost.style.top  = me.clientY + 'px';
+          }
+        };
 
-      item.addEventListener('pointerup',     endDrag);
-      item.addEventListener('pointercancel', () => {
-        captureActive = false; isDragging = false;
-        item.style.cursor = '';
-        dragGhost?.remove(); dragGhost = null;
+        const cleanup = () => {
+          item.style.cursor = '';
+          dragGhost?.remove(); dragGhost = null;
+          document.removeEventListener('pointermove',   onMove);
+          document.removeEventListener('pointerup',     onUp);
+          document.removeEventListener('pointercancel', onCancel);
+        };
+
+        const onUp = (ue: PointerEvent) => {
+          if (!isDragging) { cleanup(); return; } // click handler will open file
+          const dropX = ue.clientX, dropY = ue.clientY;
+          cleanup();
+          const target = document.elementFromPoint(dropX, dropY);
+          if (target?.closest('.cm-editor, .cm-content, .CodeMirror, .markdown-source-view')) {
+            this.insertLinkAtDrop(`[[${file.basename}]]`, target, dropX, dropY);
+          }
+        };
+
+        const onCancel = () => { wasDragged = false; cleanup(); };
+
+        document.addEventListener('pointermove',   onMove);
+        document.addEventListener('pointerup',     onUp);
+        document.addEventListener('pointercancel', onCancel);
       });
     }
+
+    // Store list updater for real-time badge/button refresh
+    this.listUpdateFn = (outgoingPaths, backlinkPaths) => {
+      for (const upd of itemUpdaters) upd(outgoingPaths, backlinkPaths);
+    };
   }
 
-  private renderGraph(el: HTMLElement, currentFile: TFile, results: { file: TFile; score: number }[]) {
+  private renderGraph(el: HTMLElement, currentFile: TFile, results: ResultEntry[]) {
     const wrap   = el.createEl('div', { cls: 'll-graph-wrap' });
     const canvas = wrap.createEl('canvas', { cls: 'll-graph' });
     const linked = this.plugin.getLinkedPaths(currentFile, results);
@@ -995,15 +1126,8 @@ class LinkLinkView extends ItemView {
       currentFile, results, linked,
       this.plugin.settings,
       (f) => this.plugin.openFile(f),
-      (f) => {
-        let ed = this.app.workspace.activeEditor?.editor;
-        if (!ed) {
-          for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-            if (leaf.view instanceof MarkdownView) { ed = leaf.view.editor; break; }
-          }
-        }
-        if (ed) ed.replaceSelection(`[[${f.basename}]]`);
-        else    new Notice('Open a note first, then drop the link.');
+      (f, dropTarget, dropX, dropY) => {
+        this.insertLinkAtDrop(`[[${f.basename}]]`, dropTarget, dropX, dropY);
       },
       (f, e) => {
         const menu = new Menu();
@@ -1017,29 +1141,27 @@ class LinkLinkView extends ItemView {
           if (!fm?.[field]) return [];
           return Array.isArray(fm[field]) ? fm[field] : [String(fm[field])];
         };
-        const isLinked = getRelated().some(r => r === `[[${f.basename}]]`);
-        if (isLinked) {
-          const bodyLinks = this.app.metadataCache.getFileCache(currentFile)?.links ?? [];
-          const isBodyRef = bodyLinks.some(l =>
-            this.app.metadataCache.getFirstLinkpathDest(l.link, currentFile.path)?.path === f.path
-          );
-          if (isBodyRef) {
-            new Notice(`"${f.basename}" is referenced directly in the note body. Remove the [[link]] from the text first.`, 6000);
-            return;
-          }
-        }
-        await this.app.fileManager.processFrontMatter(currentFile, fm => {
-          const current = getRelated();
-          if (isLinked) {
+        const isInFrontmatter = getRelated().some(r => r === `[[${f.basename}]]`);
+        const entry = results.find(r => r.file.path === f.path);
+        const isOutgoing = entry?.isOutgoing ?? false;
+        const isBacklink = entry?.isBacklink ?? false;
+
+        if (isInFrontmatter) {
+          await this.app.fileManager.processFrontMatter(currentFile, fm => {
+            const current = getRelated();
             const updated = current.filter(r => r !== `[[${f.basename}]]`);
             if (updated.length > 0) fm[field] = updated;
             else delete fm[field];
-          } else {
-            fm[field] = [...current, `[[${f.basename}]]`];
-          }
-        });
-        this.simulation?.toggleNodeLink(f, !isLinked);
-        new Notice(isLinked ? `Removed "${f.basename}" from ${field}:` : `Added "${f.basename}" to ${field}:`);
+          });
+          this.simulation?.toggleNodeLink(f, isOutgoing || isBacklink);
+          new Notice(`Removed "${f.basename}" from ${field}:`);
+        } else {
+          await this.app.fileManager.processFrontMatter(currentFile, fm => {
+            fm[field] = [...getRelated(), `[[${f.basename}]]`];
+          });
+          this.simulation?.toggleNodeLink(f, true);
+          new Notice(`Added "${f.basename}" to ${field}:`);
+        }
       }
     );
     this.simulation.start();
@@ -1056,18 +1178,29 @@ class LinkLinkView extends ItemView {
     const maxS = rScores.length > 0 ? Math.max(...rScores) : 1;
     const span = maxS - minS;
     const legend = el.createEl('div', { cls: 'll-legend' });
-    const items: [string, string][] = [
+
+    // Row 1: similarity color legend
+    const colorRow = legend.createEl('div', { cls: 'll-legend-row' });
+    for (const [color, label] of [
       ['#8b5cf6', 'current'],
       [settings.colorHigh, `≥ ${(minS + (2 * span) / 3).toFixed(2)}`],
       [settings.colorMid,  `≥ ${(minS + span / 3).toFixed(2)}`],
       [settings.colorLow,  `< ${(minS + span / 3).toFixed(2)}`],
-    ];
-    for (const [color, label] of items) {
-      const row = legend.createEl('span', { cls: 'll-legend-item' });
-      row.createEl('span', { cls: 'll-legend-dot' }).style.background = color;
-      row.createEl('span', { text: label });
+    ] as [string, string][]) {
+      const item = colorRow.createEl('span', { cls: 'll-legend-item' });
+      item.createEl('span', { cls: 'll-legend-dot' }).style.background = color;
+      item.createEl('span', { text: label });
     }
-    legend.createEl('span', { text: 'Drag out → insert [[link]]', cls: 'll-legend-item ll-legend-hint' });
+
+    // Row 2: node type markers + drag tip
+    const typeRow = legend.createEl('div', { cls: 'll-legend-row' });
+    const oTypeItem = typeRow.createEl('span', { cls: 'll-legend-item' });
+    oTypeItem.createEl('span', { cls: 'll-legend-node ll-legend-node-o' });
+    oTypeItem.createEl('span', { text: 'Outgoing link' });
+    const bTypeItem = typeRow.createEl('span', { cls: 'll-legend-item' });
+    bTypeItem.createEl('span', { cls: 'll-legend-node ll-legend-node-b' });
+    bTypeItem.createEl('span', { text: 'Backlink' });
+    typeRow.createEl('span', { text: 'Drag out → insert [[link]]', cls: 'll-legend-item ll-legend-hint' });
   }
 }
 
@@ -1298,6 +1431,19 @@ export default class LinkLinkPlugin extends Plugin {
       this.refreshView();
     }));
 
+    // Real-time badge updates: when a file's metadata changes, update O/B badges
+    // without a full panel re-render (avoids graph jitter and list flash).
+    this.registerEvent(this.app.metadataCache.on('changed', (file) => {
+      const activeFile = this.app.workspace.getActiveFile();
+      if (!activeFile) return;
+      const resolved = this.app.metadataCache.resolvedLinks;
+      // Only update if the changed file is the active note or links to/from it
+      if (file.path !== activeFile.path &&
+          !resolved[file.path]?.[activeFile.path] &&
+          !resolved[activeFile.path]?.[file.path]) return;
+      this.updateViewBadges(activeFile);
+    }));
+
     // Auto-index on file save — debounced to batch rapid saves and absorb
     // Linter's second write, eliminating race conditions on the index file.
     let fileSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1372,6 +1518,11 @@ export default class LinkLinkPlugin extends Plugin {
     if (leaf?.view instanceof LinkLinkView) leaf.view.refresh();
   }
 
+  updateViewBadges(file: TFile) {
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (leaf?.view instanceof LinkLinkView) leaf.view.updateBadges(file);
+  }
+
   private async loadCopilotIndex(): Promise<CopilotIndex> {
     const adapter = this.app.vault.adapter;
     const dir = this.settings.copilotIndexPath.trim() || '.obsidian';
@@ -1404,14 +1555,14 @@ export default class LinkLinkPlugin extends Plugin {
     return this.indexingService.loadIndex();
   }
 
-  async getRelated(file: TFile): Promise<{ file: TFile; score: number }[]> {
+  async getRelated(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
     if (this.settings.embeddingSource !== 'copilot') {
-      return this.getRelatedFromBuiltin(file);
+      return this.getRelatedFromBuiltin(file, naturalPaths);
     }
-    return this.getRelatedFromCopilot(file);
+    return this.getRelatedFromCopilot(file, naturalPaths);
   }
 
-  private async getRelatedFromBuiltin(file: TFile): Promise<{ file: TFile; score: number }[]> {
+  private async getRelatedFromBuiltin(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
     let index: IndexEntry[];
     try {
       index = await this.indexingService.loadIndex();
@@ -1431,10 +1582,14 @@ export default class LinkLinkPlugin extends Plugin {
     }
     results.sort((a, b) => b.score - a.score);
     const { topN } = this.settings;
-    return topN === 0 ? results : results.slice(0, topN);
+    if (topN === 0) return results;
+    // Natural connections (O/B) don't consume Top N slots — count only semantic results
+    const semantic = results.filter(r => !naturalPaths?.has(r.file.path));
+    const natural  = results.filter(r =>  naturalPaths?.has(r.file.path));
+    return [...semantic.slice(0, topN), ...natural];
   }
 
-  private async getRelatedFromCopilot(file: TFile): Promise<{ file: TFile; score: number }[]> {
+  private async getRelatedFromCopilot(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
     const index = await this.loadCopilotIndex();
     const docs  = index.docs.docs;
     const currentPath = file.path;
@@ -1458,12 +1613,17 @@ export default class LinkLinkPlugin extends Plugin {
     }
     results.sort((a, b) => b.score - a.score);
     const { topN } = this.settings;
-    return topN === 0 ? results : results.slice(0, topN);
+    if (topN === 0) return results;
+    // Natural connections (O/B) don't consume Top N slots — count only semantic results
+    const semantic = results.filter(r => !naturalPaths?.has(r.file.path));
+    const natural  = results.filter(r =>  naturalPaths?.has(r.file.path));
+    return [...semantic.slice(0, topN), ...natural];
   }
 
-  // Returns linked files that are NOT already in `existing`, with their actual
-  // cosine score (or 0 if not indexed). Used by graph view to always show
-  // connected notes regardless of the similarity threshold.
+  // Returns naturally-connected files NOT already in `existing` (body-text outgoing links +
+  // backlinks), with their cosine score. Frontmatter-only links (e.g. the related: field) are
+  // intentionally excluded so they remain subject to threshold filtering — otherwise interlink's
+  // own output would force notes below threshold to always appear in the panel.
   async getLinkedResults(
     currentFile: TFile,
     existing: { file: TFile; score: number }[]
@@ -1471,11 +1631,15 @@ export default class LinkLinkPlugin extends Plugin {
     const resolved = this.app.metadataCache.resolvedLinks;
     const linkedPaths = new Set<string>();
 
-    // Files the current note links TO
-    for (const path of Object.keys(resolved[currentFile.path] ?? {})) linkedPaths.add(path);
-    // Files that link TO the current note
+    // Body-text outgoing links only (excludes frontmatter wiki-links such as related:)
+    const bodyLinks = this.app.metadataCache.getFileCache(currentFile)?.links ?? [];
+    for (const link of bodyLinks) {
+      const dest = this.app.metadataCache.getFirstLinkpathDest(link.link, currentFile.path);
+      if (dest) linkedPaths.add(dest.path);
+    }
+    // Backlinks — any note that links to the current note
     for (const [src, links] of Object.entries(resolved)) {
-      if (links[currentFile.path]) linkedPaths.add(src);
+      if (src !== currentFile.path && links[currentFile.path]) linkedPaths.add(src);
     }
     linkedPaths.delete(currentFile.path);
 
@@ -1512,6 +1676,24 @@ export default class LinkLinkPlugin extends Plugin {
       if (resolved[file.path]?.[currentFile.path]) linked.add(file.path);
     }
     return linked;
+  }
+
+  getOutgoingAndBacklinkPaths(currentFile: TFile): { outgoingPaths: Set<string>; backlinkPaths: Set<string> } {
+    const resolved  = this.app.metadataCache.resolvedLinks;
+    const bodyLinks = this.app.metadataCache.getFileCache(currentFile)?.links ?? [];
+
+    const outgoingPaths = new Set<string>();
+    for (const link of bodyLinks) {
+      const dest = this.app.metadataCache.getFirstLinkpathDest(link.link, currentFile.path);
+      if (dest) outgoingPaths.add(dest.path);
+    }
+
+    const backlinkPaths = new Set<string>();
+    for (const [src, links] of Object.entries(resolved)) {
+      if (src !== currentFile.path && links[currentFile.path]) backlinkPaths.add(src);
+    }
+
+    return { outgoingPaths, backlinkPaths };
   }
 
   async loadSettings() {

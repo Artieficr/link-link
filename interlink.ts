@@ -93,18 +93,37 @@ export class InterlinkService {
     return d === 0 ? 0 : dot / d;
   }
 
-  findRelated(entry: IndexEntry, pool: IndexEntry[]): string[] {
+  // Returns paths of notes that are already naturally connected (outgoing text links + backlinks).
+  // These are excluded from the Top N count so frontmatter stays focused on new discoveries.
+  private getNaturalConnections(file: TFile): Set<string> {
+    const paths = new Set<string>();
+    const bodyLinks = this.app.metadataCache.getFileCache(file)?.links ?? [];
+    for (const link of bodyLinks) {
+      const dest = this.app.metadataCache.getFirstLinkpathDest(link.link, file.path);
+      if (dest) paths.add(dest.path);
+    }
+    const resolved = this.app.metadataCache.resolvedLinks;
+    for (const [src, links] of Object.entries(resolved)) {
+      if (src !== file.path && links[file.path]) paths.add(src);
+    }
+    return paths;
+  }
+
+  findRelated(entry: IndexEntry, pool: IndexEntry[], naturalPaths?: Set<string>): string[] {
     const { topN, threshold } = this.plugin.settings;
-    const scores: { title: string; score: number }[] = [];
+    const scores: { path: string; title: string; score: number }[] = [];
 
     for (const other of pool) {
       if (other.path === entry.path) continue;
       const score = this.cosine(entry.embedding, other.embedding);
-      if (score >= threshold) scores.push({ title: other.title, score });
+      if (score >= threshold) scores.push({ path: other.path, title: other.title, score });
     }
 
     const sorted = scores.sort((a, b) => b.score - a.score);
-    return (topN === 0 ? sorted : sorted.slice(0, topN)).map(s => s.title);
+    // Natural connections (outgoing links + backlinks) don't consume Top N slots
+    const semantic = sorted.filter(s => !naturalPaths?.has(s.path));
+    const limited  = topN === 0 ? semantic : semantic.slice(0, topN);
+    return limited.map(s => s.title);
   }
 
   // ── Frontmatter I/O ──────────────────────────────────────────────────────
@@ -137,9 +156,10 @@ export class InterlinkService {
       const entry = writable[i];
       onProgress(`${entry.title} (${i + 1} / ${writable.length})`, (i / writable.length) * 95);
 
-      const links = this.findRelated(entry, pool);
       const file  = this.app.vault.getFileByPath(entry.path);
       if (!file) continue;
+      const naturalPaths = this.getNaturalConnections(file);
+      const links = this.findRelated(entry, pool, naturalPaths);
 
       // Use Obsidian's frontmatter API — handles YAML parsing/writing correctly
       await this.app.fileManager.processFrontMatter(file, (fm) => {
@@ -159,7 +179,8 @@ export class InterlinkService {
     const pool  = index.filter(e => !this.isIgnored(e.path));
     const entry = pool.find(e => e.path === file.path);
     if (!entry) return false;
-    const links = this.findRelated(entry, pool);
+    const naturalPaths = this.getNaturalConnections(file);
+    const links = this.findRelated(entry, pool, naturalPaths);
     await this.app.fileManager.processFrontMatter(file, fm => {
       if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
       else delete fm[field];

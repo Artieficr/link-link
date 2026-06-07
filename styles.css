@@ -100,6 +100,7 @@
   padding: 4px 6px;
   border-radius: 4px;
   cursor: pointer;
+  user-select: none;
 }
 
 .ll-item:hover {
@@ -114,6 +115,18 @@
   flex-shrink: 0;
   min-width: 3.2em;
   text-align: center;
+}
+
+.ll-ref-badge {
+  font-family: var(--font-interface);
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  flex-shrink: 0;
+  line-height: 1.5;
 }
 
 .ll-link {
@@ -151,6 +164,34 @@
 .ll-item:hover .ll-item-link-btn.is-connected { opacity: 1; }
 .ll-item-link-btn.is-connected:hover          { background: var(--background-modifier-hover); color: var(--text-normal); opacity: 1; }
 
+/* ── List item tooltip (fixed-position, no delay, same visual style as header tips) ── */
+
+.ll-list-tip {
+  position: fixed;
+  z-index: 9999;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.8em;
+  line-height: 1.45;
+  max-width: 180px;
+  white-space: normal;
+  color: var(--text-normal);
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ll-list-tip-title { font-weight: 600; font-size: 0.95em; color: var(--bold-color, var(--text-normal)); }
+.ll-list-tip-body  { color: var(--text-normal); }
+
+/* Natural connection (O or B) but not in frontmatter — add button dimmed so unconnected notes stand out */
+.ll-item-link-btn.is-natural         { opacity: 0.35; }
+.ll-item:hover .ll-item-link-btn.is-natural { opacity: 0.6; }
+.ll-item-link-btn.is-natural:hover   { opacity: 1; }
+
 .ll-link:hover {
   color: var(--text-accent);
 }
@@ -173,10 +214,17 @@
 .ll-legend {
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
+  flex-direction: column;
+  gap: 3px;
   padding: 5px 8px;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+.ll-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
 }
 
 .ll-legend-item {
@@ -194,10 +242,39 @@
   flex-shrink: 0;
 }
 
+/* Node type markers in legend (mini circle with line) */
+.ll-legend-node {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.ll-legend-node::after {
+  content: '';
+  position: absolute;
+  background: var(--background-primary);
+}
+.ll-legend-node-o::after {
+  width: 1px;
+  height: 58%;
+  top: 21%;
+  left: calc(50% - 0.5px);
+}
+.ll-legend-node-b::after {
+  height: 1px;
+  width: 58%;
+  left: 21%;
+  top: calc(50% - 0.5px);
+}
+
 .ll-legend-hint {
   color: var(--text-faint);
   font-style: italic;
 }
+
 
 /* ── Drag ghost ── */
 
