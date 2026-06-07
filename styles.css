@@ -486,6 +486,7 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   padding: 10px 12px;
+  margin-top: 12px;
   margin-bottom: 12px;
 }
 .ll-prog-pct {
@@ -978,3 +979,83 @@
 .ll-modal-input:focus { border-color: var(--interactive-accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 20%, transparent); }
 .ll-modal-hint  { font-size: 0.8em; color: var(--text-muted); margin: 0; }
 .ll-modal-error { font-size: 0.82em; color: var(--text-error); margin: 0; }
+.ll-modal-btns  { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* ── Settings tab: spacer + wizard button ── */
+.ll-tab-spacer      { flex: 1; }
+.ll-tab-wizard-btn  { font-size: 0.82em; padding: 4px 12px; }
+
+/* ── Setup wizard modal ── */
+.ll-wizard-modal               { width: 600px; max-width: 92vw; }
+.ll-wizard-modal .modal-content { padding: 28px; }
+
+/* Progress bar */
+.ll-wiz-progress    { display: flex; align-items: flex-start; margin-bottom: 28px; }
+.ll-wiz-step-wrap   { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: 0 0 auto; }
+.ll-wiz-node        { width: 10px; height: 10px; border-radius: 50%; background: var(--background-modifier-border); transition: background 0.2s; flex-shrink: 0; }
+.ll-wiz-node.done   { background: var(--interactive-accent); }
+.ll-wiz-node.active { background: var(--interactive-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent); }
+.ll-wiz-line        { flex: 1; height: 2px; background: var(--background-modifier-border); margin-top: 4px; min-width: 16px; transition: background 0.2s; }
+.ll-wiz-line.filled { background: var(--interactive-accent); }
+.ll-wiz-node-label  { font-size: 0.7em; color: var(--text-muted); white-space: nowrap; text-align: center; }
+.ll-wiz-node-label.active { color: var(--text-normal); font-weight: 600; }
+
+/* Step body */
+.ll-wiz-body        { display: flex; flex-direction: column; gap: 14px; }
+.ll-wiz-title       { font-size: 1.15em; font-weight: 700; color: var(--text-normal); margin: 0; }
+.ll-wiz-desc        { font-size: 0.88em; color: var(--text-muted); line-height: 1.55; margin: 0; }
+.ll-wiz-desc-muted  { font-size: 0.82em; }
+.ll-wiz-section-label { font-size: 0.82em; font-weight: 600; color: var(--text-normal); }
+
+/* Footer */
+.ll-wiz-footer       { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--background-modifier-border); }
+.ll-wiz-footer-spacer { flex: 1; }
+
+/* Model cards */
+.ll-wiz-cards        { display: flex; flex-direction: column; gap: 8px; }
+.ll-wiz-card         { padding: 11px 14px; border: 1.5px solid var(--background-modifier-border); border-radius: 8px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.ll-wiz-card:hover   { border-color: var(--interactive-accent); }
+.ll-wiz-card.selected { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 8%, transparent); }
+.ll-wiz-card-title   { font-size: 0.88em; font-weight: 600; color: var(--text-normal); }
+.ll-wiz-card-desc    { font-size: 0.82em; color: var(--text-muted); margin-top: 3px; }
+.ll-wiz-card-req     { font-size: 0.78em; color: var(--text-accent); margin-top: 5px; }
+
+/* Ollama inline form */
+.ll-wiz-ollama-wrap  { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--background-secondary); border-radius: 7px; }
+.ll-wiz-conn-row     { display: flex; align-items: center; gap: 10px; }
+.ll-wiz-conn-badge   { font-size: 0.82em; }
+.ll-wiz-conn-ok      { color: var(--text-success, #22c55e); }
+.ll-wiz-conn-warn    { color: var(--text-warning, #eab308); }
+.ll-wiz-conn-fail    { color: var(--text-error); }
+
+/* Ready / done notes */
+.ll-wiz-ready-note   { font-size: 0.85em; color: var(--text-success, #22c55e); margin: 0; }
+.ll-wiz-done-wrap    { display: flex; flex-direction: column; gap: 8px; }
+.ll-wiz-done-desc    { font-size: 0.85em; color: var(--text-muted); }
+.ll-wiz-graph-row    { display: flex; align-items: center; gap: 10px; }
+.ll-wiz-done-btns    { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Interlink step: field UI */
+.ll-wiz-field-section  { display: flex; flex-direction: column; gap: 8px; }
+.ll-wiz-field-status   { display: flex; flex-direction: column; gap: 6px; }
+.ll-wiz-field-warning  { font-size: 0.85em; color: var(--text-warning, #eab308); margin: 0; }
+.ll-wiz-field-info     { font-size: 0.85em; color: var(--text-muted); margin: 0; }
+.ll-wiz-field-choice   { display: flex; gap: 8px; flex-wrap: wrap; }
+.ll-wiz-field-input-wrap { display: flex; flex-direction: column; gap: 6px; }
+
+/* Pink "Use it anyways" button */
+.ll-action-btn-pink { background: #fce4ec; color: #c62828; border: 1px solid #f8bbd0; }
+.ll-action-btn-pink:hover:not(:disabled) { background: #f8bbd0; opacity: 1; }
+
+/* Two-minute bold line in welcome */
+.ll-wiz-two-min { margin-top: 4px; }
+
+/* Settings field: Cancel/Confirm row */
+.ll-field-confirm-row { display: flex; gap: 8px; margin-top: 6px; }
+/* Wizard field: "good" feedback */
+.ll-field-ok        { color: var(--text-success, #22c55e) !important; }
+.ll-wiz-warn-safe   { font-size: 0.85em; color: var(--text-success, #22c55e); margin: 0; }
+.ll-wiz-warn-mixed  { font-size: 0.85em; color: var(--text-warning, #eab308); margin: 0; }
+
+/* Progress wrap inside wizard */
+.ll-wiz-prog-wrap    { display: flex; flex-direction: column; gap: 4px; }

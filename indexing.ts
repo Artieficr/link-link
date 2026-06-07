@@ -319,7 +319,8 @@ export class IndexingService {
   // scanned and deleted-file entries are pruned.
   async index(
     onProgress: (msg: string, pct: number) => void,
-    targetFiles?: TFile[]
+    targetFiles?: TFile[],
+    signal?: AbortSignal
   ): Promise<{ added: number; updated: number; removed: number; skipped: number }> {
     // Load existing index (empty on first run)
     let existing: IndexEntry[] = [];
@@ -362,6 +363,7 @@ export class IndexingService {
     // Embed
     let added = 0, updated = 0;
     for (let i = 0; i < toEmbed.length; i++) {
+      if (signal?.aborted) throw new DOMException('Indexing cancelled', 'AbortError');
       const file = toEmbed[i];
       const pct  = 10 + (i / toEmbed.length) * 85;
       onProgress(`(${i + 1}/${toEmbed.length}) ${file.basename}`, pct);

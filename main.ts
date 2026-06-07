@@ -19,6 +19,20 @@ import { InterlinkService, ConfirmModal } from './interlink';
 
 const VIEW_TYPE = 'link-link-view';
 
+// ─── Frontmatter field validation ────────────────────────────────────────────
+
+const RESERVED_FM_KEYS = new Set(['tags', 'aliases', 'title', 'cssclass', 'cssclasses', 'publish', 'created', 'modified', 'date']);
+const FM_FIELD_PATTERN  = /^[a-zA-Z0-9_-]+$/;
+
+function validateFmFieldName(value: string): string | null {
+  if (!value) return null;
+  if (!FM_FIELD_PATTERN.test(value))
+    return 'Only letters (a–z, A–Z), numbers, hyphens (-) and underscores (_) are allowed. No spaces or special characters.';
+  if (RESERVED_FM_KEYS.has(value.toLowerCase()))
+    return `"${value}" is a reserved frontmatter key — choose a different name.`;
+  return null;
+}
+
 interface OllamaModel {
   id: string;
   modelName: string;
@@ -33,6 +47,7 @@ interface LinkLinkSettings {
   embeddingSource: 'builtin' | 'existing' | 'local';
   existingIndexPath: string;
   detectedIndexFiles: { path: string; format: string }[];
+  wizardShown: boolean;
   ollamaModels: OllamaModel[];
   // Indexing filters
   indexMode: 'exclude' | 'include';
@@ -69,6 +84,7 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   embeddingSource: 'builtin',
   existingIndexPath: '',
   detectedIndexFiles: [],
+  wizardShown: false,
   ollamaModels: [],
   indexMode: 'exclude',
   excludePaths: [],
@@ -901,7 +917,7 @@ class LinkLinkView extends ItemView {
               const { added, updated, removed } = await this.plugin.indexingService.index(onProgress);
               const summary = added + updated === 0
                 ? 'Index is up to date.'
-                : `+${added} new, ${updated} updated, ${removed} removed`;
+                : `+${added} new, ${updated} updated, ${removed} removed`;
               onDone(summary);
               progLabel.setText('Indexing complete!');
               bar.style.width = '100%';
@@ -1199,6 +1215,19 @@ class LinkLinkView extends ItemView {
 
 // ─── Index progress popup ─────────────────────────────────────────────────────
 
+const CLEAR_PHRASES = [
+  'Cutting ties, professionally',
+  'Letting some notes go their own way',
+  'Severing links with surgical precision',
+  'Cleaning up what no longer belongs together',
+  'Some connections weren\'t meant to last',
+  'Trimming the overgrowth',
+  'Performing the ancient ritual of unlinking',
+  'Your graph is about to get a little quieter',
+  'Snipping the red string',
+  'Breaking up is hard to do, but someone has to',
+];
+
 const INDEX_PHRASES = [
   'Teaching notes to recognize each other',
   'Measuring the distance between thoughts',
@@ -1210,6 +1239,39 @@ const INDEX_PHRASES = [
   'Doing math so you don\'t have to',
   'The model is thinking. Please hold',
   'Embeddings are embedding',
+  'Reading between your lines',
+  'Turning prose into numbers, somehow',
+  'Teaching math to read',
+  'Finding patterns you forgot you made',
+  'Crunching vectors',
+  'Making sense out of chaos',
+  'Assigning coordinates to your thoughts',
+  'These numbers mean something, probably',
+  'Giving your notes a sense of smell',
+  'Tracking down the escaped notes by smell',
+];
+
+const INTERLINK_PHRASES = [
+  'Playing matchmaker for your notes',
+  'Introducing ideas that should have met sooner',
+  'Drawing your notes map by hand',
+  'Weaving the web of your knowledge base',
+  'Forging note chains',
+  'Making meaningful connections',
+  'Helping your notes find their people',
+  'Building bridges between lonely ideas',
+  'Performing the ancient ritual of linking',
+  'Your graph is about to get a lot more interesting',
+  'Connecting the dots you didn\'t know were there',
+  'Your future self will thank you for this',
+  'Stitching your vault together, one link at a time',
+  'Introducing strangers that were never really strangers',
+  'Untangling your spaghetti of ideas',
+  'Making orphaned notes feel seen',
+  'Pulling loose threads into a tapestry',
+  'Rewiring your knowledge graph',
+  'The web grows',
+  'Every note deserves a neighbour',
 ];
 
 class IndexProgressPopup {
@@ -1368,7 +1430,7 @@ export default class LinkLinkPlugin extends Plugin {
           const { added, updated, removed } = await this.indexingService.index(onProgress);
           const summary = added + updated === 0
             ? 'Index is up to date.'
-            : `+${added} new, ${updated} updated, ${removed} removed`;
+            : `+${added} new, ${updated} updated, ${removed} removed`;
           onDone(summary);
           this.refreshView();
         } catch (e) {
@@ -1417,6 +1479,20 @@ export default class LinkLinkPlugin extends Plugin {
         }
       },
     });
+    this.addCommand({
+      id: 'run-wizard',
+      name: 'Run setup wizard',
+      callback: () => new SetupWizardModal(this.app, this).open(),
+    });
+
+    if (!this.settings.wizardShown) {
+      this.settings.wizardShown = true;
+      await this.saveSettings();
+      this.app.workspace.onLayoutReady(() =>
+        setTimeout(() => new SetupWizardModal(this.app, this).open(), 600)
+      );
+    }
+
     this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => {
       // Clicking the graph canvas activates the link-link leaf itself — skip
       // that refresh so the simulation stays alive and first click works.
@@ -1478,7 +1554,7 @@ export default class LinkLinkPlugin extends Plugin {
             .then(({ added, updated, removed }) => {
               const summary = added + updated === 0
                 ? 'Index is up to date.'
-                : `+${added} new, ${updated} updated, ${removed} removed`;
+                : `+${added} new, ${updated} updated, ${removed} removed`;
               onDone(summary);
               this.refreshView();
             })
@@ -1601,10 +1677,10 @@ export default class LinkLinkPlugin extends Plugin {
     results.sort((a, b) => b.score - a.score);
     const { topN } = this.settings;
     if (topN === 0) return results;
-    // Natural connections (O/B) don't consume Top N slots — count only semantic results
+    // Natural connections (O/B) don't consume Top N slots — cap only semantic count, then merge and re-sort
     const semantic = results.filter(r => !naturalPaths?.has(r.file.path));
     const natural  = results.filter(r =>  naturalPaths?.has(r.file.path));
-    return [...semantic.slice(0, topN), ...natural];
+    return [...semantic.slice(0, topN), ...natural].sort((a, b) => b.score - a.score);
   }
 
   private async getRelatedFromExisting(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
@@ -1627,10 +1703,10 @@ export default class LinkLinkPlugin extends Plugin {
     results.sort((a, b) => b.score - a.score);
     const { topN } = this.settings;
     if (topN === 0) return results;
-    // Natural connections (O/B) don't consume Top N slots — count only semantic results
+    // Natural connections (O/B) don't consume Top N slots — cap only semantic count, then merge and re-sort
     const semantic = results.filter(r => !naturalPaths?.has(r.file.path));
     const natural  = results.filter(r =>  naturalPaths?.has(r.file.path));
-    return [...semantic.slice(0, topN), ...natural];
+    return [...semantic.slice(0, topN), ...natural].sort((a, b) => b.score - a.score);
   }
 
   // Returns naturally-connected files NOT already in `existing` (body-text outgoing links +
@@ -1706,13 +1782,18 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   async loadSettings() {
-    const data = await this.loadData() ?? {};
+    const rawData = await this.loadData();
+    const data: Record<string, any> = rawData ?? {};
     if (data.embeddingSource === 'copilot') {
       data.embeddingSource = 'existing';
       data.existingIndexPath = '';
       delete data.copilotIndexPath;
     }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    // Existing users upgrading: don't auto-show wizard
+    if (rawData !== null && !('wizardShown' in data)) {
+      this.settings.wizardShown = true;
+    }
   }
 
   async saveSettings() {
@@ -1890,7 +1971,7 @@ class OllamaModelModal extends Modal {
     const urlInput = urlField.createEl('input', { type: 'text', cls: 'll-modal-input' });
     urlInput.placeholder = 'http://localhost:11434';
     urlInput.value = this.existing?.baseUrl ?? '';
-    urlField.createEl('p', { text: 'Leave it blank, unless you are using a proxy.', cls: 'll-modal-hint' });
+    urlField.createEl('p', { text: 'Leave URL blank unless using a proxy.', cls: 'll-modal-hint' });
 
     const btns = contentEl.createEl('div', { cls: 'll-modal-btns' });
     btns.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' })
@@ -1920,6 +2001,706 @@ class OllamaModelModal extends Modal {
   }
 
   onClose() { this.contentEl.empty(); }
+}
+
+// ─── Setup wizard ────────────────────────────────────────────────────────────
+
+class SetupWizardModal extends Modal {
+  private plugin: LinkLinkPlugin;
+  private step = 0;
+  private chosenModel: 'builtin' | 'existing' | 'local';
+  // Ollama form state (persisted across back/forward)
+  private wzOllamaName    = '';
+  private wzOllamaDisplay = '';
+  private wzOllamaUrl     = '';
+  private wzOllamaId: string | null = null;
+
+  constructor(app: App, plugin: LinkLinkPlugin) {
+    super(app);
+    this.plugin = plugin;
+    this.chosenModel = plugin.settings.embeddingSource;
+    const active = plugin.settings.ollamaModels.find(m => m.active);
+    if (active) {
+      this.wzOllamaName    = active.modelName;
+      this.wzOllamaDisplay = active.displayName;
+      this.wzOllamaUrl     = active.baseUrl;
+      this.wzOllamaId      = active.id;
+    }
+  }
+
+  onOpen() { this.modalEl.addClass('ll-wizard-modal'); this.render(); }
+  onClose() { this.contentEl.empty(); }
+
+  private get S() { return this.plugin.settings; }
+  private save()  { return this.plugin.saveSettings(); }
+
+  private stepLabels(): string[] {
+    return this.chosenModel === 'existing'
+      ? ['Welcome', 'Model', 'Index file', 'Interlink', 'Done']
+      : ['Welcome', 'Model', 'Targeting',  'Index',     'Interlink', 'Done'];
+  }
+
+  private render() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    // ── Progress bar ─────────────────────────────────────────────────────
+    const labels = this.stepLabels();
+    const prog = contentEl.createEl('div', { cls: 'll-wiz-progress' });
+    labels.forEach((label, i) => {
+      if (i > 0) prog.createEl('div', { cls: 'll-wiz-line' + (i <= this.step ? ' filled' : '') });
+      const wrap = prog.createEl('div', { cls: 'll-wiz-step-wrap' });
+      wrap.createEl('div', { cls: 'll-wiz-node' + (i < this.step ? ' done' : i === this.step ? ' active' : '') });
+      wrap.createEl('span', { text: label, cls: 'll-wiz-node-label' + (i === this.step ? ' active' : '') });
+    });
+
+    // ── Step body ─────────────────────────────────────────────────────────
+    const body = contentEl.createEl('div', { cls: 'll-wiz-body' });
+    const ex = this.chosenModel === 'existing';
+    if      (this.step === 0) this.renderWelcome(body);
+    else if (this.step === 1) this.renderModel(body);
+    else if (this.step === 2) ex ? this.renderIndexFile(body) : this.renderTargeting(body);
+    else if (this.step === 3) ex ? this.renderInterlink(body) : this.renderIndex(body);
+    else if (this.step === 4) ex ? this.renderDone(body)      : this.renderInterlink(body);
+    else                           this.renderDone(body);
+  }
+
+  private goTo(step: number) { this.step = step; this.render(); }
+
+  private mkFooter(body: HTMLElement, onBack?: () => void): HTMLElement {
+    const row = body.createEl('div', { cls: 'll-wiz-footer' });
+    if (this.step > 0) {
+      const back = row.createEl('button', { text: '← Back', cls: 'll-action-btn ll-action-btn-secondary' });
+      back.addEventListener('click', onBack ?? (() => this.goTo(this.step - 1)));
+    }
+    row.createEl('div', { cls: 'll-wiz-footer-spacer' });
+    return row;
+  }
+
+  // ── Step 0: Welcome ───────────────────────────────────────────────────────
+  private renderWelcome(body: HTMLElement) {
+    body.createEl('div', { text: 'Welcome to Link Link!', cls: 'll-wiz-title' });
+    body.createEl('p', {
+      text: 'Link Link finds semantically related notes in your vault using embeddings — a compact numerical representation of what each note means.',
+      cls: 'll-wiz-desc',
+    });
+    body.createEl('p', {
+      text: 'This wizard will help you pick an embedding model, set your indexing scope, build your first index, and wire up your vault\'s knowledge graph.',
+      cls: 'll-wiz-desc',
+    });
+    body.createEl('p', { cls: 'll-wiz-desc ll-wiz-two-min' })
+      .createEl('strong', { text: 'Takes about two minutes.' });
+    const row = this.mkFooter(body);
+    const next = row.createEl('button', { text: 'Get Started →', cls: 'll-action-btn ll-action-btn-accent' });
+    next.addEventListener('click', () => this.goTo(1));
+  }
+
+  // ── Step 1: Model ─────────────────────────────────────────────────────────
+  private renderModel(body: HTMLElement) {
+    body.createEl('div', { text: 'Choose embedding model', cls: 'll-wiz-title' });
+
+    const MODELS: { id: 'builtin' | 'local' | 'existing'; label: string; desc: string; req: string }[] = [
+      { id: 'builtin',  label: 'Built-in (lightweight)', desc: 'A compact model shipped with the plugin. No setup required, runs fully offline.', req: 'No requirements' },
+      { id: 'local',    label: 'Local model (Ollama)',   desc: 'Use a locally-running Ollama server for more powerful models and full control.',    req: 'Requires Ollama installed and running' },
+      { id: 'existing', label: 'Existing index file',    desc: 'Reuse an embedding index already in your vault (e.g. from the Copilot plugin).',   req: 'Another plugin must have already indexed your vault' },
+    ];
+
+    let selected = this.chosenModel;
+    const cards = body.createEl('div', { cls: 'll-wiz-cards' });
+
+    // Ollama inline form
+    const ollamaWrap = body.createEl('div', { cls: 'll-wiz-ollama-wrap' });
+    ollamaWrap.style.display = selected === 'local' ? '' : 'none';
+    const nameInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    nameInput.placeholder = 'Model name (e.g. bge-m3)';
+    nameInput.value = this.wzOllamaName;
+    const nameErr = ollamaWrap.createEl('p', { cls: 'll-modal-error' });
+    nameErr.style.display = 'none';
+    const dispInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    dispInput.placeholder = 'Display name (optional)';
+    dispInput.value = this.wzOllamaDisplay;
+    const urlInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    urlInput.placeholder = 'Base URL (default: http://localhost:11434)';
+    urlInput.value = this.wzOllamaUrl;
+    ollamaWrap.createEl('p', { text: 'Leave URL blank unless using a proxy.', cls: 'll-modal-hint' });
+    const connRow = ollamaWrap.createEl('div', { cls: 'll-wiz-conn-row' });
+    const checkBtn = connRow.createEl('button', { text: 'Check connection', cls: 'll-action-btn ll-action-btn-secondary' }) as HTMLButtonElement;
+    const connBadge = connRow.createEl('span', { cls: 'll-wiz-conn-badge' });
+    let localVerified = !!this.wzOllamaId; // pre-verified if a model was already saved
+    if (this.wzOllamaId) { connBadge.setText('✓ Saved'); connBadge.addClass('ll-wiz-conn-ok'); }
+
+    const footerRow = this.mkFooter(body);
+    const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' }) as HTMLButtonElement;
+
+    const updateNext = () => {
+      nextBtn.disabled = selected === 'local' && (!nameInput.value.trim() || !localVerified);
+    };
+    updateNext();
+    nameInput.addEventListener('input', () => { localVerified = false; updateNext(); });
+
+    checkBtn.addEventListener('click', async () => {
+      const mn = nameInput.value.trim();
+      if (!mn) { nameErr.setText('Model name is required.'); nameErr.style.display = 'block'; return; }
+      nameErr.style.display = 'none';
+      checkBtn.disabled = true; checkBtn.setText('Checking…');
+      connBadge.className = 'll-wiz-conn-badge'; connBadge.setText('');
+      try {
+        const base = (urlInput.value.trim() || 'http://localhost:11434').replace(/\/$/, '');
+        const resp = await fetch(`${base}/api/tags`);
+        if (!resp.ok) throw new Error();
+        const data = await resp.json() as { models?: { name: string }[] };
+        const found = (data.models ?? []).some(m => m.name === mn || m.name.startsWith(mn + ':'));
+        connBadge.setText(found ? '✓ Reachable' : '! Model not found on server');
+        connBadge.addClass(found ? 'll-wiz-conn-ok' : 'll-wiz-conn-warn');
+        localVerified = found;
+        updateNext();
+      } catch { connBadge.setText('✗ Unreachable'); connBadge.addClass('ll-wiz-conn-fail'); localVerified = false; updateNext(); }
+      finally { checkBtn.disabled = false; checkBtn.setText('Check connection'); }
+    });
+
+    nextBtn.addEventListener('click', async () => {
+      if (selected === 'local') {
+        const mn = nameInput.value.trim();
+        if (!mn) { nameErr.setText('Model name is required.'); nameErr.style.display = 'block'; nameInput.focus(); return; }
+        nameErr.style.display = 'none';
+        if (this.wzOllamaId) {
+          const m = this.S.ollamaModels.find(m => m.id === this.wzOllamaId);
+          if (m) { m.modelName = mn; m.displayName = dispInput.value.trim(); m.baseUrl = urlInput.value.trim(); }
+        } else {
+          const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+          for (const m of this.S.ollamaModels) m.active = false;
+          this.S.ollamaModels.push({ id, modelName: mn, displayName: dispInput.value.trim(), baseUrl: urlInput.value.trim(), active: true });
+          this.wzOllamaId = id;
+        }
+        this.wzOllamaName = mn; this.wzOllamaDisplay = dispInput.value.trim(); this.wzOllamaUrl = urlInput.value.trim();
+      }
+      this.S.embeddingSource = selected;
+      this.chosenModel = selected;
+      await this.save();
+      this.goTo(2);
+    });
+
+    for (const m of MODELS) {
+      const card = cards.createEl('div', { cls: 'll-wiz-card' + (selected === m.id ? ' selected' : '') });
+      card.createEl('div', { text: m.label, cls: 'll-wiz-card-title' });
+      card.createEl('div', { text: m.desc,  cls: 'll-wiz-card-desc' });
+      card.createEl('div', { text: m.req,   cls: 'll-wiz-card-req' });
+      card.addEventListener('click', () => {
+        cards.querySelectorAll('.ll-wiz-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selected = m.id;
+        ollamaWrap.style.display = m.id === 'local' ? '' : 'none';
+        updateNext();
+      });
+    }
+  }
+
+  // ── Step 2a: Targeting (builtin/local) ───────────────────────────────────
+  private renderTargeting(body: HTMLElement) {
+    body.createEl('div', { text: 'Indexing scope', cls: 'll-wiz-title' });
+    body.createEl('p', {
+      text: 'Indexing reads each note and creates a compact semantic fingerprint — everything runs locally, nothing leaves your machine.',
+      cls: 'll-wiz-desc',
+    });
+    body.createEl('p', {
+      text: 'Exclude folders or files that don\'t represent ideas worth linking to — templates, asset folders, attachment directories, and any structural content. Keeping those out makes connections more focused and meaningful.',
+      cls: 'll-wiz-desc',
+    });
+
+    const S = this.S;
+    const section = body.createEl('div', { cls: 'll-action-section ll-action-section-flat' });
+    const modeHeader = section.createEl('div', { cls: 'll-filter-mode-header' });
+    modeHeader.createEl('span', { text: 'Targeting mode', cls: 'll-filter-mode-label' });
+    const modeRow = modeHeader.createEl('div', { cls: 'll-mode-row' });
+    const modeDesc = section.createEl('p', { cls: 'll-mode-desc' });
+    const filterWrap = section.createEl('div');
+
+    const updateModeDesc = () => modeDesc.setText(
+      S.indexMode === 'exclude'
+        ? 'Listed folders and files are skipped. Subfolders are excluded automatically.'
+        : 'Only listed folders and files are indexed. Everything else is skipped.'
+    );
+    const renderFilter = () => {
+      filterWrap.empty();
+      const paths = S.indexMode === 'exclude' ? S.excludePaths : S.includePaths;
+      filterSection(filterWrap, this.app,
+        S.indexMode === 'exclude' ? 'Excluded paths' : 'Included paths',
+        S.indexMode === 'exclude' ? 'Skipped during indexing.' : 'Only these are indexed.',
+        paths,
+        async v => { if (S.indexMode === 'exclude') S.excludePaths = v; else S.includePaths = v; await this.save(); }
+      );
+    };
+    updateModeDesc(); renderFilter();
+
+    for (const [val, label] of [['exclude', 'Exclude'], ['include', 'Only include']] as const) {
+      const btn = modeRow.createEl('button', { cls: 'll-mode-btn' + (S.indexMode === val ? ' active' : ''), text: label });
+      btn.addEventListener('click', async () => {
+        S.indexMode = val; await this.save();
+        modeRow.querySelectorAll('.ll-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active'); updateModeDesc(); renderFilter();
+      });
+    }
+
+    const row = this.mkFooter(body);
+    const next = row.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
+    next.addEventListener('click', () => this.goTo(3));
+  }
+
+  // ── Step 2b: Index file (existing) ───────────────────────────────────────
+  private renderIndexFile(body: HTMLElement) {
+    body.createEl('div', { text: 'Select index file', cls: 'll-wiz-title' });
+    body.createEl('p', {
+      text: 'Link Link will read an existing embedding index from inside your vault. Select the file below, or enter its path manually.',
+      cls: 'll-wiz-desc',
+    });
+
+    const S = this.S;
+    const detectedWrap = body.createEl('div', { cls: 'll-detected-wrap' });
+    const detectedHeader = detectedWrap.createEl('div', { cls: 'll-detected-header' });
+    detectedHeader.createEl('span', { text: 'Auto-detected index files', cls: 'll-detected-title' });
+    const scanBtn = detectedHeader.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' }) as HTMLButtonElement;
+    setIcon(scanBtn.createEl('span', { cls: 'll-btn-icon' }), 'search');
+    scanBtn.createEl('span', { text: 'Scan' });
+    const detectedList = detectedWrap.createEl('div', { cls: 'll-detected-list' });
+
+    let pathInput!: HTMLInputElement;
+    let nextBtn!: HTMLButtonElement;
+    const updateNext = () => { if (nextBtn) nextBtn.disabled = !S.existingIndexPath.trim(); };
+
+    const renderDetected = (files: { path: string; format: string }[]) => {
+      detectedList.empty();
+      if (!files.length) { detectedList.createEl('p', { text: 'No index files found.', cls: 'll-detected-empty' }); return; }
+      for (const f of files) {
+        const row = detectedList.createEl('div', { cls: 'll-detected-row' });
+        const cb = row.createEl('input') as HTMLInputElement; cb.type = 'checkbox'; cb.checked = S.existingIndexPath === f.path;
+        const lbl = row.createEl('span', { cls: 'll-detected-path' });
+        lbl.createEl('span', { text: f.path, cls: 'll-detected-path-text' });
+        lbl.createEl('span', { text: f.format, cls: 'll-detected-format' });
+        cb.addEventListener('change', async () => {
+          S.existingIndexPath = cb.checked ? f.path : '';
+          if (cb.checked) detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { if (c !== cb) c.checked = false; });
+          if (pathInput) pathInput.value = S.existingIndexPath;
+          updateNext(); await this.save();
+        });
+      }
+      if (S.existingIndexPath) {
+        readyNote.style.display = '';
+        readyNote.setText(`✓ Index file ready — no additional indexing needed.`);
+      }
+    };
+
+    const readyNote = body.createEl('p', { cls: 'll-wiz-ready-note' });
+    readyNote.style.display = S.existingIndexPath ? '' : 'none';
+    if (S.existingIndexPath) readyNote.setText('✓ Index file ready — no additional indexing needed.');
+
+    new Setting(body).setName('Index file path').addText(t => {
+      t.setPlaceholder('.obsidian/<path-to-your-index-file>').setValue(S.existingIndexPath)
+       .onChange(async v => {
+         S.existingIndexPath = v;
+         detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
+         readyNote.style.display = v.trim() ? '' : 'none';
+         if (v.trim()) readyNote.setText('✓ Index file ready — no additional indexing needed.');
+         updateNext(); await this.save();
+       });
+      pathInput = t.inputEl as HTMLInputElement;
+    });
+
+    const runScan = async () => {
+      scanBtn.disabled = true; scanBtn.querySelector('span:last-child')!.textContent = 'Scanning…';
+      try { const found = await this.plugin.scanForIndexFiles(); renderDetected(found); S.detectedIndexFiles = found; await this.save(); return found; }
+      finally { scanBtn.disabled = false; scanBtn.querySelector('span:last-child')!.textContent = 'Scan'; }
+    };
+    scanBtn.addEventListener('click', () => runScan());
+
+    if (S.detectedIndexFiles.length > 0) renderDetected(S.detectedIndexFiles);
+    else if (!S.existingIndexPath) runScan();
+    else detectedList.createEl('p', { text: 'Press Scan to detect index files.', cls: 'll-detected-empty' });
+
+    // Footer always last so it renders below all content
+    const footerRow = this.mkFooter(body);
+    nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' }) as HTMLButtonElement;
+    nextBtn.disabled = !S.existingIndexPath.trim();
+    nextBtn.addEventListener('click', async () => { await this.save(); this.goTo(3); });
+  }
+
+  // ── Step 3b: Index vault (builtin/local) ─────────────────────────────────
+  private renderIndex(body: HTMLElement) {
+    body.createEl('div', { text: 'Index your vault', cls: 'll-wiz-title' });
+    body.createEl('p', {
+      text: 'Indexing reads each note and builds a compact semantic fingerprint stored in a separate file — your notes are never modified. Everything runs locally, nothing leaves your machine.',
+      cls: 'll-wiz-desc',
+    });
+
+    const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' });
+    progressWrap.style.display = 'none';
+    const pctEl    = progressWrap.createEl('p', { cls: 'll-prog-pct' });
+    const phraseEl = progressWrap.createEl('p', { cls: 'll-prog-phrase' });
+    const progLabel = progressWrap.createEl('p', { cls: 'll-prog-label' });
+    const bar = progressWrap.createEl('div', { cls: 'll-progress-wrap' }).createEl('div', { cls: 'll-progress-bar' });
+    const doneNote = body.createEl('p', { cls: 'll-wiz-ready-note' }); doneNote.style.display = 'none';
+
+    const idxBtn = body.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
+    setIcon(idxBtn.createEl('span', { cls: 'll-btn-icon' }), 'database');
+    idxBtn.createEl('span', { text: 'Index Vault' });
+
+    let isIndexing = false;
+    let controller: AbortController | null = null;
+    let phraseTimer: number | null = null;
+    const stopPhrases = () => { if (phraseTimer !== null) { clearInterval(phraseTimer); phraseTimer = null; } };
+
+    const footerRow = this.mkFooter(body, () => {
+      if (!isIndexing) { this.goTo(this.step - 1); return; }
+      new ConfirmModal(this.app,
+        'Stop indexing?',
+        'Indexing is in progress. Going back will stop it — progress will be lost.',
+        () => { controller?.abort(); stopPhrases(); this.goTo(this.step - 1); },
+        'Stop and go back', false, 'Wait'
+      ).open();
+    });
+
+    const skipBtn = footerRow.createEl('button', { text: 'Skip for now →', cls: 'll-action-btn ll-action-btn-secondary' });
+    skipBtn.addEventListener('click', () => this.goTo(this.step + 1));
+
+    idxBtn.addEventListener('click', async () => {
+      idxBtn.disabled = true; skipBtn.disabled = true;
+      progressWrap.style.display = '';
+      isIndexing = true;
+      controller = new AbortController();
+
+      let phraseIdx = Math.floor(Math.random() * INDEX_PHRASES.length);
+      phraseEl.setText(INDEX_PHRASES[phraseIdx]);
+      phraseTimer = window.setInterval(() => {
+        phraseIdx = (phraseIdx + 1) % INDEX_PHRASES.length;
+        phraseEl.setText(INDEX_PHRASES[phraseIdx]);
+      }, 3000);
+
+      try {
+        const { added, updated, removed } = await this.plugin.indexingService.index(
+          (msg, pct) => { progLabel.setText(msg); bar.style.width = `${pct}%`; pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : ''); },
+          undefined,
+          controller.signal
+        );
+        stopPhrases();
+        progressWrap.style.display = 'none';
+        doneNote.style.display = '';
+        doneNote.setText(`✓ Done — ${added + updated} notes indexed${removed ? `, ${removed} removed` : ''}.`);
+        skipBtn.style.display = 'none';
+        const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
+        nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
+      } catch (e) {
+        stopPhrases();
+        progressWrap.style.display = 'none';
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        body.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
+        idxBtn.disabled = false; skipBtn.disabled = false;
+      } finally {
+        isIndexing = false;
+      }
+    });
+  }
+
+  // ── Interlink step (step 4 for builtin/local, step 3 for existing) ────────
+  private renderInterlink(body: HTMLElement) {
+    body.createEl('div', { text: 'Interlink your vault', cls: 'll-wiz-title' });
+    body.createEl('p', {
+      text: 'Interlink command writes your top related notes into each note\'s frontmatter as [[links]], making connections visible in Graph View. Only the dedicated frontmatter field is modified. Your other content stays intact.',
+      cls: 'll-wiz-desc',
+    });
+
+    const S = this.S;
+
+    // ── Field name ────────────────────────────────────────────────────────
+    const fieldSection = body.createEl('div', { cls: 'll-wiz-field-section' });
+    fieldSection.createEl('div', { text: 'Frontmatter field', cls: 'll-wiz-section-label' });
+    fieldSection.createEl('p', { text: 'By default the command uses the `related` frontmatter field.', cls: 'll-modal-hint' });
+
+    const statusWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-status' });
+    const choiceWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-choice' });
+    const fieldInputWrap = fieldSection.createEl('div', { cls: 'll-wiz-field-input-wrap' });
+    const fieldInput     = fieldInputWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    const fieldErr       = fieldInputWrap.createEl('p', { cls: 'll-modal-error' }); fieldErr.style.display = 'none';
+    const fieldDesc      = fieldInputWrap.createEl('p', { cls: 'll-modal-hint' }); fieldDesc.style.display = 'none';
+    const statusNote     = fieldSection.createEl('p', { cls: 'll-modal-hint' }); statusNote.style.display = 'none';
+    let lastValidField        = S.relatedFieldName;
+    let fieldReady            = false;
+    let useReplaceMode        = false;
+    let createNewFieldDefault = '';
+    const fieldConfirmRow = fieldSection.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.style.display = 'none';
+    fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
+      fieldInput.value = lastValidField; fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+    });
+    fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', async () => {
+      const pending = fieldConfirmRow.dataset['pending'] ?? '';
+      lastValidField = pending; S.relatedFieldName = pending; await this.save();
+      fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+      statusNote.setText('Will use \u201c' + (pending || 'related') + ':\u201d frontmatter field when interlinking.');
+      statusNote.style.display = '';
+      setFieldReady(true);
+    });
+
+    // Interlink action area
+    body.createEl('div', { cls: 'll-section-sep' });
+    const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' }); progressWrap.style.display = 'none';
+    const pctEl    = progressWrap.createEl('p', { cls: 'll-prog-pct' });
+    const phraseEl = progressWrap.createEl('p', { cls: 'll-prog-phrase' });
+    const progLabel = progressWrap.createEl('p', { cls: 'll-prog-label' });
+    const bar = progressWrap.createEl('div', { cls: 'll-progress-wrap' }).createEl('div', { cls: 'll-progress-bar' });
+    const doneWrap = body.createEl('div', { cls: 'll-wiz-done-wrap' }); doneWrap.style.display = 'none';
+
+    const ilBtn = body.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
+    setIcon(ilBtn.createEl('span', { cls: 'll-btn-icon' }), 'git-branch');
+    ilBtn.createEl('span', { text: 'Interlink Vault' });
+    ilBtn.disabled = true;
+
+    const footerRow = this.mkFooter(body);
+    const skipBtn = footerRow.createEl('button', { text: 'Skip for now \u2192', cls: 'll-action-btn ll-action-btn-secondary' });
+    skipBtn.addEventListener('click', () => this.goTo(this.step + 1));
+
+    // ── Field classification helper ──────────────────────────────────────
+    const classifyField = (fieldName: string): { atRisk: number; safe: number } => {
+      const indexableSet = new Set(this.plugin.indexingService.getFilesToIndex().map((f: TFile) => f.path));
+      const ignored  = this.S.ignoredPaths;
+      const readOnly = this.S.readOnlyPaths;
+      const isExcluded = (p: string) =>
+        ignored.some(i => p === i || p.startsWith(i + '/')) ||
+        readOnly.some(r => p === r || p.startsWith(r + '/')) ||
+        !indexableSet.has(p);
+      let atRisk = 0, safe = 0;
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        if (this.app.metadataCache.getFileCache(file)?.frontmatter?.[fieldName] !== undefined) {
+          if (isExcluded(file.path)) safe++; else atRisk++;
+        }
+      }
+      return { atRisk, safe };
+    };
+
+    // ── Field input handlers ────────────────────────────────────────────
+    const setFieldReady = (ready: boolean) => {
+      fieldReady = ready; ilBtn.disabled = !ready;
+    };
+
+    fieldInput.addEventListener('input', () => {
+      const err = validateFmFieldName(fieldInput.value.trim());
+      fieldErr.style.display = err ? 'block' : 'none';
+      if (err) fieldErr.setText(err);
+      if (fieldInput.value.trim()) fieldDesc.style.display = 'none';
+    });
+    fieldInput.addEventListener('blur', async () => {
+      const v = fieldInput.value.trim();
+      const err = validateFmFieldName(v);
+      if (err) { fieldInput.value = lastValidField; fieldErr.style.display = 'none'; return; }
+      const effectiveName = v || createNewFieldDefault;
+      if (!v && effectiveName) { fieldInput.value = effectiveName; fieldDesc.style.display = 'none'; }
+      const displayName = effectiveName || 'related';
+      const { atRisk, safe } = classifyField(displayName);
+      const total = atRisk + safe;
+      fieldErr.removeClass('ll-field-ok');
+      if (total === 0) {
+        // No notes — good
+        fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+        fieldErr.setText('Good \u2014 no notes with \u201c' + displayName + ':\u201d found. It will be used when interlinking.');
+        fieldErr.addClass('ll-field-ok'); fieldErr.style.display = 'block';
+        statusNote.style.display = 'none';
+        lastValidField = effectiveName; S.relatedFieldName = effectiveName; await this.save();
+        setFieldReady(true);
+      } else if (atRisk === 0) {
+        // All in exceptions — safe
+        fieldErr.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+        fieldErr.setText('Good \u2014 ' + safe + ' note' + (safe > 1 ? 's' : '') + ' have \u201c' + displayName + ':\u201d but all are excluded by your rules \u2014 safe to proceed.');
+        fieldErr.addClass('ll-field-ok'); fieldErr.style.display = 'block';
+        statusNote.style.display = 'none';
+        lastValidField = effectiveName; S.relatedFieldName = effectiveName; await this.save();
+        setFieldReady(true);
+      } else if (safe > 0) {
+        // Mixed — show split count + confirm
+        fieldErr.setText(atRisk + ' of ' + total + ' note' + (total > 1 ? 's' : '') + ' with \u201c' + displayName + ':\u201d will be overwritten (' + safe + ' excluded by rules, safe). Continue?');
+        fieldErr.style.display = 'block';
+        statusNote.style.display = 'none';
+        fieldConfirmRow.style.display = 'flex';
+        fieldConfirmRow.dataset['pending'] = effectiveName;
+        setFieldReady(false);
+        return;
+      } else {
+        // All at risk
+        fieldErr.setText(total + ' note' + (total > 1 ? 's' : '') + ' with \u201c' + displayName + ':\u201d found. Content will be overwritten on interlink.');
+        fieldErr.style.display = 'block';
+        statusNote.style.display = 'none';
+        fieldConfirmRow.style.display = 'flex';
+        fieldConfirmRow.dataset['pending'] = effectiveName;
+        setFieldReady(false);
+        return;
+      }
+    });
+
+    // ── Async scan vault ────────────────────────────────────────────────
+    (async () => {
+      let connectedCount = 0;
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (fm?.['connected'] !== undefined) connectedCount++;
+      }
+
+      const { atRisk: relatedAtRisk, safe: relatedSafe } = classifyField('related');
+      const relatedCount = relatedAtRisk + relatedSafe;
+      const hasCustomField = !!(S.relatedFieldName && S.relatedFieldName !== 'related');
+
+      // Shared button setup for conflict cases
+      const addChoiceButtons = () => {
+        const useBtn = choiceWrap.createEl('button', { text: 'Use it anyways', cls: 'll-action-btn ll-action-btn-pink' });
+        const newBtn = choiceWrap.createEl('button', { text: 'Create new field', cls: 'll-action-btn ll-action-btn-accent' });
+        fieldInputWrap.style.display = 'none';
+
+        useBtn.addEventListener('click', () => {
+          new ConfirmModal(this.app,
+            'You have notes with existing frontmatter named \u2018related\u2019.',
+            'If you use it with this plugin it will be rewritten and all current content in this field will be lost. This cannot be easily undone.',
+            () => {
+              useReplaceMode = true;
+              fieldInputWrap.style.display = 'none';
+              fieldDesc.style.display = 'none';
+              fieldErr.style.display = 'none';
+              statusNote.setText('Will use “' + (S.relatedFieldName || 'related') + ':” frontmatter field when interlinking.');
+              statusNote.style.display = '';
+              setFieldReady(true);
+            },
+            'I understand. Rewrite.', true
+          ).open();
+        });
+
+        newBtn.addEventListener('click', () => {
+          fieldInputWrap.style.display = '';
+          S.relatedFieldName = ''; lastValidField = '';
+          createNewFieldDefault = !connectedCount ? 'connected' : '';
+          fieldInput.placeholder = !connectedCount ? 'connected' : 'my-field';
+          fieldInput.value = '';
+          if (!connectedCount) { fieldDesc.setText("Leave empty to use 'connected'"); fieldDesc.style.display = ''; }
+          fieldInput.focus();
+          statusNote.style.display = 'none';
+          fieldErr.style.display = 'none';
+          setFieldReady(false);
+        });
+      };
+
+      if (hasCustomField) {
+        // User already resolved the conflict — restore custom field state, no warning
+        fieldInputWrap.style.display = '';
+        fieldInput.value = S.relatedFieldName;
+        lastValidField = S.relatedFieldName;
+        createNewFieldDefault = !connectedCount ? 'connected' : '';
+        fieldInput.placeholder = !connectedCount ? 'connected' : 'my-field';
+        statusNote.setText('Will use \u201c' + S.relatedFieldName + ':\u201d frontmatter field when interlinking.');
+        statusNote.style.display = '';
+        setFieldReady(true);
+      } else if (relatedCount === 0) {
+        // No conflict — show input directly
+        fieldInputWrap.style.display = '';
+        fieldInput.placeholder = !connectedCount ? 'connected' : 'related';
+        fieldInput.value = S.relatedFieldName;
+        lastValidField = S.relatedFieldName;
+        setFieldReady(true);
+      } else if (relatedAtRisk === 0) {
+        // All 'related:' notes are in exceptions — safe to proceed with default field
+        statusWrap.createEl('p', {
+          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' have a "related:" field, but all are excluded from interlinking by your exception rules \u2014 safe to proceed.',
+          cls: 'll-wiz-warn-safe',
+        });
+        const newBtn = choiceWrap.createEl('button', { text: 'Create new field', cls: 'll-action-btn ll-action-btn-secondary' });
+        newBtn.addEventListener('click', () => {
+          fieldInputWrap.style.display = '';
+          S.relatedFieldName = ''; lastValidField = '';
+          createNewFieldDefault = !connectedCount ? 'connected' : '';
+          fieldInput.placeholder = !connectedCount ? 'connected' : 'my-field';
+          fieldInput.value = '';
+          if (!connectedCount) { fieldDesc.setText("Leave empty to use 'connected'"); fieldDesc.style.display = ''; }
+          fieldInput.focus();
+          statusNote.style.display = 'none';
+          setFieldReady(false);
+        });
+        fieldInputWrap.style.display = 'none';
+        setFieldReady(true); // safe with default 'related'
+      } else if (relatedSafe > 0) {
+        // Mixed — some at risk, some safe
+        statusWrap.createEl('p', {
+          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' have a "related:" field — ' + relatedSafe + ' excluded by your rules (won\u2019t be affected), ' + relatedAtRisk + ' will be overwritten on interlink.',
+          cls: 'll-wiz-warn-mixed',
+        });
+        addChoiceButtons();
+      } else {
+        // All at risk
+        statusWrap.createEl('p', {
+          text: relatedCount + ' note' + (relatedCount > 1 ? 's' : '') + ' already have a "related:" field.',
+          cls: 'll-modal-error',
+        });
+        addChoiceButtons();
+      }
+    })();
+
+    // ── Interlink Vault run ─────────────────────────────────────────────
+    const runInterlink = async () => {
+      ilBtn.disabled = true; skipBtn.disabled = true; progressWrap.style.display = '';
+      let phraseIdx = Math.floor(Math.random() * INTERLINK_PHRASES.length);
+      phraseEl.setText(INTERLINK_PHRASES[phraseIdx]);
+      const phraseTimer = window.setInterval(() => {
+        phraseIdx = (phraseIdx + 1) % INTERLINK_PHRASES.length;
+        phraseEl.setText(INTERLINK_PHRASES[phraseIdx]);
+      }, 3000);
+      try {
+        const index = await this.plugin.loadAnyIndex();
+        const { updated } = await this.plugin.interlinkService.run(index, (msg, pct) => {
+          progLabel.setText(msg); bar.style.width = pct + '%';
+          pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : '');
+        });
+        clearInterval(phraseTimer);
+        progressWrap.style.display = 'none'; doneWrap.style.display = '';
+        doneWrap.createEl('p', { text: '✓ ' + updated + ' notes connected.', cls: 'll-wiz-ready-note' });
+        const graphRow = doneWrap.createEl('div', { cls: 'll-wiz-graph-row' });
+        graphRow.createEl('span', { text: 'Open Graph View to see your vault\'s new connected state.', cls: 'll-wiz-done-desc' });
+        const graphBtn = graphRow.createEl('button', { text: 'Open Graph View', cls: 'll-action-btn ll-action-btn-secondary' });
+        // @ts-ignore
+        graphBtn.addEventListener('click', () => this.app.commands.executeCommandById('graph:open'));
+        skipBtn.style.display = 'none';
+        const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
+        nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
+      } catch (e) {
+        clearInterval(phraseTimer);
+        progressWrap.style.display = 'none';
+        body.createEl('p', { text: 'Error: ' + (e instanceof Error ? e.message : String(e)), cls: 'll-error' });
+        ilBtn.disabled = !fieldReady; skipBtn.disabled = false;
+      }
+    };
+
+    ilBtn.addEventListener('click', async () => {
+      const field   = S.relatedFieldName || 'related';
+      const existing = await this.plugin.interlinkService.findNotesWithRelated();
+      if (existing.length > 0) {
+        new ConfirmModal(this.app,
+          existing.length + ' note' + (existing.length > 1 ? 's' : '') + ' already have a "' + field + ':" field',
+          'Running interlink will replace their existing content. Continue?',
+          runInterlink
+        ).open();
+      } else { await runInterlink(); }
+    });
+  }
+  // ── Done ─────────────────────────────────────────────────────────────────
+  private renderDone(body: HTMLElement) {
+    body.createEl('div', { text: 'You\'re all set!', cls: 'll-wiz-title' });
+    body.createEl('p', { text: 'Link Link! is ready to go. Open the related notes panel to start exploring connections.', cls: 'll-wiz-desc' });
+    body.createEl('p', {
+      text: 'Open Settings → Link Link! to fine-tune thresholds, Top N, display options, and more.',
+      cls: 'll-wiz-desc ll-wiz-desc-muted',
+    });
+    const footerRow = this.mkFooter(body);
+    const settBtn = footerRow.createEl('button', { text: 'Open Settings', cls: 'll-action-btn ll-action-btn-secondary' });
+    settBtn.addEventListener('click', () => {
+      this.close();
+      // @ts-ignore
+      this.app.setting.open();
+      // @ts-ignore
+      this.app.setting.openTabById('link-link');
+    });
+    const panelBtn = footerRow.createEl('button', { text: 'Open related notes panel', cls: 'll-action-btn ll-action-btn-accent' });
+    panelBtn.addEventListener('click', () => { this.close(); this.plugin.activateView(); });
+  }
 }
 
 // ─── Settings tab ────────────────────────────────────────────────────────────
@@ -1985,9 +2766,15 @@ class LinkLinkSettingTab extends PluginSettingTab {
       btn.addEventListener('click', () => switchTab(id));
     }
 
+    tabBar.createEl('div', { cls: 'll-tab-spacer' });
+    const wizBtn = tabBar.createEl('button', { cls: 'll-action-btn ll-action-btn-accent ll-tab-wizard-btn' });
+    setIcon(wizBtn.createEl('span', { cls: 'll-btn-icon' }), 'wand-sparkles');
+    wizBtn.createEl('span', { text: 'Run the wizard' });
+    wizBtn.addEventListener('click', () => new SetupWizardModal(this.app, this.plugin).open());
+
     // ── Shared helpers ───────────────────────────────────────────────────
 
-    const makeProgress = (parent: HTMLElement) => {
+    const makeProgress = (parent: HTMLElement, phrases = INDEX_PHRASES) => {
       const wrap     = parent.createEl('div', { cls: 'll-settings-prog' });
       wrap.style.display = 'none';
       const pctEl    = wrap.createEl('p',   { cls: 'll-prog-pct' });
@@ -1996,17 +2783,17 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const track    = wrap.createEl('div', { cls: 'll-progress-wrap' });
       const bar      = track.createEl('div', { cls: 'll-progress-bar' });
 
-      let phraseIdx   = Math.floor(Math.random() * INDEX_PHRASES.length);
+      let phraseIdx   = Math.floor(Math.random() * phrases.length);
       let phraseTimer: number | null = null;
 
       const startPhrases = () => {
         if (phraseTimer !== null) return;
-        phraseEl.setText(INDEX_PHRASES[phraseIdx]);
+        phraseEl.setText(phrases[phraseIdx]);
         phraseTimer = window.setInterval(() => {
-          phraseIdx = (phraseIdx + 1) % INDEX_PHRASES.length;
+          phraseIdx = (phraseIdx + 1) % phrases.length;
           phraseEl.style.opacity = '0';
           setTimeout(() => {
-            phraseEl.setText(INDEX_PHRASES[phraseIdx]);
+            phraseEl.setText(phrases[phraseIdx]);
             phraseEl.style.opacity = '1';
           }, 220);
         }, 3500);
@@ -2086,7 +2873,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         <div class="ll-tip-item"><div class="ll-tip-title">Built-in (lightweight)</div>
           <div class="ll-tip-body">A compact model shipped with the plugin. Runs fully offline with no downloads required.</div></div>
         <div class="ll-tip-item"><div class="ll-tip-title">Local model (Ollama)</div>
-          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>
+          <div class="ll-tip-body">Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.</div></div>
         <div class="ll-tip-item"><div class="ll-tip-title">Existing index file</div>
           <div class="ll-tip-body">Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.</div></div>`;
       helpBtn.addEventListener('mouseenter', () => {
@@ -2243,7 +3030,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         renderModels();
       } else {
         body.createEl('p', {
-          text: 'Use an existing embedding index created by another plugin. The index file must be located inside your vault.',
+          text: 'Use an existing embedding index created by another plugin. The index file must be located inside your vault.',
           cls: 'll-model-info-desc',
         });
 
@@ -2697,7 +3484,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 const { added, updated, removed } = await this.plugin.indexingService.index(onProgress);
                 const summary = added + updated === 0
                   ? 'Index is up to date.'
-                  : `+${added} new, ${updated} updated, ${removed} removed`;
+                  : `+${added} new, ${updated} updated, ${removed} removed`;
                 onDone(summary);
                 showProg('Indexing complete!', 100);
                 hideProg();
@@ -2717,7 +3504,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
     // ── INTERLINK VAULT TAB ──────────────────────────────────────────────
 
     const renderInterlink = () => {
-      const { show: showProg, hide: hideProg } = makeProgress(body);
+      let showProg: (msg: string, pct: number) => void;
+      let hideProg: (delay?: number) => void;
 
 
       body.createEl('h3', { text: 'Exceptions' });
@@ -2751,24 +3539,47 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
       body.createEl('h3', { text: 'Frontmatter field' });
 
-      const RESERVED_FM_KEYS = new Set(['tags', 'aliases', 'title', 'cssclass', 'cssclasses', 'publish', 'created', 'modified', 'date']);
-      new Setting(body)
+      let lastValidRelatedField = S.relatedFieldName;
+      const fieldSetting = new Setting(body)
         .setName('Related field name')
         .setDesc('The frontmatter field where related links are written. Rename if you already use "related" for something else.')
-        .addText(t => t
-          .setPlaceholder('related')
-          .setValue(S.relatedFieldName)
-          .onChange(async v => {
-            const trimmed = v.trim();
-            const effective = trimmed || 'related';
-            if (RESERVED_FM_KEYS.has(effective)) {
-              new Notice(`⚠️ "${effective}" is a reserved frontmatter key — choose a different field name.`);
-              return;
-            }
-            S.relatedFieldName = trimmed;
-            await save();
-          })
-        );
+        .addText(t => {
+          t.setPlaceholder('related').setValue(S.relatedFieldName);
+          const input = t.inputEl;
+          input.addEventListener('input', () => {
+            const err = validateFmFieldName(input.value.trim());
+            fieldErrEl.style.display = err ? 'block' : 'none';
+            if (err) fieldErrEl.setText(err);
+          });
+          input.addEventListener('blur', async () => {
+            const v = input.value.trim();
+            const err = validateFmFieldName(v);
+            if (err) { input.value = lastValidRelatedField; fieldErrEl.style.display = 'none'; fieldConfirmRow.style.display = 'none'; return; }
+            fieldConfirmRow.style.display = 'none';
+            if (v && v !== lastValidRelatedField) {
+              let count = 0;
+              for (const file of app.vault.getMarkdownFiles()) {
+                if (app.metadataCache.getFileCache(file)?.frontmatter?.[v] !== undefined) count++;
+              }
+              if (count > 0) { fieldErrEl.setText(`${count} note${count > 1 ? 's' : ''} already use "${v}:" — content will be overwritten on interlink.`); fieldErrEl.style.display = 'block'; fieldConfirmRow.style.display = 'flex'; return; }
+              else { fieldErrEl.style.display = 'none'; }
+            } else { fieldErrEl.style.display = 'none'; }
+            lastValidRelatedField = v; S.relatedFieldName = v; await save();
+          });
+        });
+      const fieldErrEl = body.createEl('p', { cls: 'll-modal-error' }); fieldErrEl.style.display = 'none';
+      const fieldConfirmRow = body.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.style.display = 'none';
+      fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
+        const input = fieldSetting.controlEl.querySelector('input') as HTMLInputElement;
+        if (input) input.value = lastValidRelatedField;
+        fieldErrEl.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+      });
+      fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', async () => {
+        const input = fieldSetting.controlEl.querySelector('input') as HTMLInputElement;
+        const v = input?.value.trim() ?? '';
+        lastValidRelatedField = v; S.relatedFieldName = v; await save();
+        fieldErrEl.style.display = 'none'; fieldConfirmRow.style.display = 'none';
+      });
 
       body.createEl('h3', { text: 'Run interlink' });
 
@@ -2776,7 +3587,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       ilSection.createEl('div', { cls: 'll-interlink-lead',
         text: 'Interlink Vault connects your notes with similar concepts and ideas.' });
       ilSection.createEl('div', { cls: 'll-interlink-body',
-        text: 'It reads your vault\'s embeddings — a compact numerical representation of each note\'s content — ' +
+        text: 'It reads your vault\'s embeddings — a compact numerical representation of each note\'s content — ' +
               'and finds notes that are semantically similar to each other. When you run Interlink, it writes those ' +
               'connections into each note\'s frontmatter as native Obsidian [[links]], under the field you configure above.' });
       ilSection.createEl('div', { cls: 'll-interlink-footer',
@@ -2792,6 +3603,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const clearBtn = ilRow.createEl('button', { cls: 'll-action-btn ll-action-btn-danger' });
       setIcon(clearBtn.createEl('span', { cls: 'll-btn-icon' }), 'eraser');
       clearBtn.createEl('span', { text: 'Clear related field' });
+
+      let showClearProg: (msg: string, pct: number) => void;
+      let hideClearProg: (delay?: number) => void;
+      ({ show: showProg, hide: hideProg } = makeProgress(ilSection, INTERLINK_PHRASES));
+      ({ show: showClearProg, hide: hideClearProg } = makeProgress(ilSection, CLEAR_PHRASES));
 
       ilBtn.addEventListener('click', async () => {
         const existing = await this.plugin.interlinkService.findNotesWithRelated();
@@ -2826,14 +3642,14 @@ class LinkLinkSettingTab extends PluginSettingTab {
           `This permanently removes the "${S.relatedFieldName || 'related'}" field from every note that has it.`,
           async () => {
             ilBtn.disabled = true; clearBtn.disabled = true;
-            showProg('Clearing…', 0);
+            showClearProg('Clearing…', 0);
             try {
-              const count = await this.plugin.interlinkService.clearRelated((msg, pct) => showProg(msg, pct));
-              showProg(`Cleared ${count} notes.`, 100);
-              hideProg();
+              const count = await this.plugin.interlinkService.clearRelated((msg, pct) => showClearProg(msg, pct));
+              showClearProg(`Cleared ${count} notes.`, 100);
+              hideClearProg();
             } catch (e) {
-              showProg(`Error: ${e instanceof Error ? e.message : String(e)}`, 0);
-              hideProg(4000);
+              showClearProg(`Error: ${e instanceof Error ? e.message : String(e)}`, 0);
+              hideClearProg(4000);
             } finally { ilBtn.disabled = false; clearBtn.disabled = false; }
           },
           'I understand. Delete.',

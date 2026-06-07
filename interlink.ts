@@ -11,13 +11,16 @@ export class ConfirmModal extends Modal {
   private confirmText: string;
   private destructive: boolean;
 
+  private cancelText: string;
+
   constructor(
     app: App,
     message: string,
     detail: string,
     onConfirm: () => void,
     confirmText = 'Continue',
-    destructive = false
+    destructive = false,
+    cancelText = 'Cancel'
   ) {
     super(app);
     this.message     = message;
@@ -25,6 +28,7 @@ export class ConfirmModal extends Modal {
     this.onConfirm   = onConfirm;
     this.confirmText = confirmText;
     this.destructive = destructive;
+    this.cancelText  = cancelText;
   }
 
   onOpen() {
@@ -32,7 +36,7 @@ export class ConfirmModal extends Modal {
     contentEl.createEl('h3', { text: this.message });
     contentEl.createEl('p',  { text: this.detail, cls: 'll-modal-detail' });
     const row = contentEl.createEl('div', { cls: 'll-modal-btns' });
-    row.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
+    row.createEl('button', { text: this.cancelText }).addEventListener('click', () => this.close());
     const ok = row.createEl('button', {
       text: this.confirmText,
       cls: this.destructive ? 'll-btn-danger' : 'll-btn-accent'
@@ -199,7 +203,7 @@ export class InterlinkService {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      onProgress(`Scanning… (${i + 1} / ${files.length})`, (i / files.length) * 100);
+      onProgress(`${file.basename}`, (i / files.length) * 100);
 
       if (this.isIgnored(file.path) || this.isReadOnly(file.path)) continue;
       const cache = this.app.metadataCache.getFileCache(file);
