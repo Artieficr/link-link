@@ -4,7 +4,7 @@
 
 [Obsidian](https://obsidian.md/) native graph view is an amazing tool to see connections between your notes and find relevant links. But it requires constant manual link embedding. When a vault grows, many notes may become connected by spirit but lost from each other by actual native Obsidian connections — hence the graph view will display them as orphans.
 
-**Link Link!** finds notes similar to the one you're reading and shows them in a live side panel, ranked by how closely they match. Drag and drop from the panel to create a fast link, or use automated commands that embed a list of semantically similar notes into the frontmatter field. You can run a command to populate the currently open note or interconnect the whole vault!
+**Link Link!** finds semantically similar notes and shows them in a live side panel — ranked, color coded, and ready to link. Click to open, drag into the editor to paste a [[link]], or batch-connect your entire vault in one command!
 
 No cloud services, no subscriptions, no data leaving your machine. Private by default.
 
