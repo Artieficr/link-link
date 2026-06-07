@@ -984,7 +984,7 @@ class LinkLinkView extends ItemView {
         el.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
       };
       attachTip(badgeO, 'Outgoing link', 'This note is referenced in the current note\'s body text.');
-      attachTip(badgeB, 'Backlink',      'The current note is referenced in this note\'s body text.');
+      attachTip(badgeB, 'Backlink',      'The current note is referenced by this note.');
 
       item.createEl('span', { text: file.basename, cls: 'll-link' })
         .addEventListener('contextmenu', (e) => {
