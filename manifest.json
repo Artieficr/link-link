@@ -1,7 +1,7 @@
 {
   "id": "link-link",
   "name": "Link Link",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "minAppVersion": "1.5.7",
   "description": "Finds semantically similar notes and shows them in a live side panel, ranked by relevance. Click to open, drag into the editor to paste a [[link]], or batch-connect your entire vault in one command.",
   "author": "Artie Tsoy",

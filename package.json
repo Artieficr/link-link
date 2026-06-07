@@ -1,14 +1,14 @@
 {
   "name": "link-link",
-  "version": "1.2.1",
-  "description": "Semantic related notes panel",
+  "version": "1.2.2",
+  "description": "Finds semantically similar notes and shows them in a live side panel, ranked by relevance. Click to open, drag into the editor to paste a [[link]], or batch-connect your entire vault in one command.",
   "main": "main.js",
   "scripts": {
     "build": "tsc --noEmit && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs"
   },
   "keywords": [],
-  "author": "Artie",
+  "author": "Artie Tsoy",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "25.9.1",
