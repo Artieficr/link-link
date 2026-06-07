@@ -3,7 +3,7 @@
   "name": "Link Link",
   "version": "1.2.1",
   "minAppVersion": "1.4.0",
-  "description": "Finds semantically similar notes and shows them in a live side panel — ranked, color coded, and ready to link with shortcuts. Click to open, drag into the editor to paste a [[link]], or batch-connect your entire vault in one command.",
+  "description": "Finds semantically similar notes and shows them in a live side panel, ranked by relevance. Click to open, drag into the editor to paste a [[link]], or batch-connect your entire vault in one command.",
   "author": "Artie Tsoy",
   "authorUrl": "https://github.com/Artieficr",
   "isDesktopOnly": true
