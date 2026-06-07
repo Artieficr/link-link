@@ -2838,7 +2838,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
     // ── EMBEDDING TAB ────────────────────────────────────────────────────
 
     const renderEmbedding = () => {
-      const { show: showProg, hide: hideProg } = makeProgress(body);
+      let showProg: (msg: string, pct: number) => void = () => {};
+      let hideProg: (delay?: number) => void = () => {};
 
       // Model source
       body.createEl('h3', { text: 'Model source' });
@@ -3419,6 +3420,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           });
         };
         rebuildDeleteGroup();
+        ({ show: showProg, hide: hideProg } = makeProgress(idxSection));
 
         // Restore indexing defaults
         body.createEl('div', { cls: 'll-restore-sep' });
