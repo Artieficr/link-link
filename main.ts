@@ -1213,6 +1213,30 @@ class LinkLinkView extends ItemView {
   }
 }
 
+function startPhraseRotator(
+  el: HTMLElement,
+  phrases: string[],
+  intervalMs: number,
+  fade = false
+): () => void {
+  let idx = Math.floor(Math.random() * phrases.length);
+  el.setText(phrases[idx]);
+  let fadeTimer: number | null = null;
+  const timer = window.setInterval(() => {
+    idx = (idx + 1) % phrases.length;
+    if (fade) {
+      el.style.opacity = '0';
+      fadeTimer = window.setTimeout(() => { fadeTimer = null; el.setText(phrases[idx]); el.style.opacity = '1'; }, 220);
+    } else {
+      el.setText(phrases[idx]);
+    }
+  }, intervalMs);
+  return () => {
+    clearInterval(timer);
+    if (fadeTimer !== null) { clearTimeout(fadeTimer); fadeTimer = null; el.style.opacity = '1'; }
+  };
+}
+
 // ─── Index progress popup ─────────────────────────────────────────────────────
 
 const CLEAR_PHRASES = [
@@ -1280,14 +1304,11 @@ class IndexProgressPopup {
   private phraseEl: HTMLElement;
   private statusEl: HTMLElement;
   private barEl: HTMLElement;
-  private phraseTimer: number | null = null;
-  private phraseIndex: number;
+  private stopPhrases: (() => void) | null = null;
   dismissed  = false;
   isFinished = false;
 
   constructor() {
-    this.phraseIndex = Math.floor(Math.random() * INDEX_PHRASES.length);
-
     this.el = document.body.createEl('div', { cls: 'll-idx-popup' });
 
     const header = this.el.createEl('div', { cls: 'll-idx-popup-header' });
@@ -1300,21 +1321,13 @@ class IndexProgressPopup {
     });
 
     this.phraseEl = this.el.createEl('div', { cls: 'll-idx-popup-phrase' });
-    this.phraseEl.setText(INDEX_PHRASES[this.phraseIndex]);
 
     const barWrap = this.el.createEl('div', { cls: 'll-progress-wrap' });
     this.barEl = barWrap.createEl('div', { cls: 'll-progress-bar indeterminate' });
 
     this.statusEl = this.el.createEl('div', { cls: 'll-idx-popup-status' });
 
-    this.phraseTimer = window.setInterval(() => {
-      this.phraseIndex = (this.phraseIndex + 1) % INDEX_PHRASES.length;
-      this.phraseEl.style.opacity = '0';
-      setTimeout(() => {
-        this.phraseEl.setText(INDEX_PHRASES[this.phraseIndex]);
-        this.phraseEl.style.opacity = '1';
-      }, 220);
-    }, 3500);
+    this.stopPhrases = startPhraseRotator(this.phraseEl, INDEX_PHRASES, 3500, true);
   }
 
   update(msg: string, pct: number) {
@@ -1326,7 +1339,7 @@ class IndexProgressPopup {
 
   finish(summary: string, timeoutSec: number) {
     this.isFinished = true;
-    if (this.phraseTimer !== null) { clearInterval(this.phraseTimer); this.phraseTimer = null; }
+    this.stopPhrases?.(); this.stopPhrases = null;
     this.titleEl.setText('Link Link ✓');
     this.phraseEl.style.opacity = '1';
     this.phraseEl.setText('Done!');
@@ -1337,7 +1350,7 @@ class IndexProgressPopup {
   }
 
   close() {
-    if (this.phraseTimer !== null) { clearInterval(this.phraseTimer); this.phraseTimer = null; }
+    this.stopPhrases?.(); this.stopPhrases = null;
     this.el.remove();
   }
 }
@@ -2345,15 +2358,14 @@ class SetupWizardModal extends Modal {
 
     let isIndexing = false;
     let controller: AbortController | null = null;
-    let phraseTimer: number | null = null;
-    const stopPhrases = () => { if (phraseTimer !== null) { clearInterval(phraseTimer); phraseTimer = null; } };
+    let stopPhrases: (() => void) | null = null;
 
     const footerRow = this.mkFooter(body, () => {
       if (!isIndexing) { this.goTo(this.step - 1); return; }
       new ConfirmModal(this.app,
         'Stop indexing?',
         'Indexing is in progress. Going back will stop it — progress will be lost.',
-        () => { controller?.abort(); stopPhrases(); this.goTo(this.step - 1); },
+        () => { controller?.abort(); stopPhrases?.(); stopPhrases = null; this.goTo(this.step - 1); },
         'Stop and go back', false, 'Wait'
       ).open();
     });
@@ -2367,12 +2379,7 @@ class SetupWizardModal extends Modal {
       isIndexing = true;
       controller = new AbortController();
 
-      let phraseIdx = Math.floor(Math.random() * INDEX_PHRASES.length);
-      phraseEl.setText(INDEX_PHRASES[phraseIdx]);
-      phraseTimer = window.setInterval(() => {
-        phraseIdx = (phraseIdx + 1) % INDEX_PHRASES.length;
-        phraseEl.setText(INDEX_PHRASES[phraseIdx]);
-      }, 3000);
+      stopPhrases = startPhraseRotator(phraseEl, INDEX_PHRASES, 3000);
 
       try {
         const { added, updated, removed } = await this.plugin.indexingService.index(
@@ -2380,7 +2387,7 @@ class SetupWizardModal extends Modal {
           undefined,
           controller.signal
         );
-        stopPhrases();
+        stopPhrases?.(); stopPhrases = null;
         progressWrap.style.display = 'none';
         doneNote.style.display = '';
         doneNote.setText(`✓ Done — ${added + updated} notes indexed${removed ? `, ${removed} removed` : ''}.`);
@@ -2388,7 +2395,7 @@ class SetupWizardModal extends Modal {
         const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
         nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
       } catch (e) {
-        stopPhrases();
+        stopPhrases?.(); stopPhrases = null;
         progressWrap.style.display = 'none';
         if (e instanceof DOMException && e.name === 'AbortError') return;
         body.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
@@ -2457,8 +2464,8 @@ class SetupWizardModal extends Modal {
     skipBtn.addEventListener('click', () => this.goTo(this.step + 1));
 
     // ── Field classification helper ──────────────────────────────────────
+    const indexableSet = new Set(this.plugin.indexingService.getFilesToIndex().map((f: TFile) => f.path));
     const classifyField = (fieldName: string): { atRisk: number; safe: number } => {
-      const indexableSet = new Set(this.plugin.indexingService.getFilesToIndex().map((f: TFile) => f.path));
       const ignored  = this.S.ignoredPaths;
       const readOnly = this.S.readOnlyPaths;
       const isExcluded = (p: string) =>
@@ -2638,19 +2645,14 @@ class SetupWizardModal extends Modal {
     // ── Interlink Vault run ─────────────────────────────────────────────
     const runInterlink = async () => {
       ilBtn.disabled = true; skipBtn.disabled = true; progressWrap.style.display = '';
-      let phraseIdx = Math.floor(Math.random() * INTERLINK_PHRASES.length);
-      phraseEl.setText(INTERLINK_PHRASES[phraseIdx]);
-      const phraseTimer = window.setInterval(() => {
-        phraseIdx = (phraseIdx + 1) % INTERLINK_PHRASES.length;
-        phraseEl.setText(INTERLINK_PHRASES[phraseIdx]);
-      }, 3000);
+      const stopPhrases = startPhraseRotator(phraseEl, INTERLINK_PHRASES, 3000);
       try {
         const index = await this.plugin.loadAnyIndex();
         const { updated } = await this.plugin.interlinkService.run(index, (msg, pct) => {
           progLabel.setText(msg); bar.style.width = pct + '%';
           pctEl.setText(pct > 0 ? `${Math.round(pct)}%` : '');
         });
-        clearInterval(phraseTimer);
+        stopPhrases();
         progressWrap.style.display = 'none'; doneWrap.style.display = '';
         doneWrap.createEl('p', { text: '✓ ' + updated + ' notes connected.', cls: 'll-wiz-ready-note' });
         const graphRow = doneWrap.createEl('div', { cls: 'll-wiz-graph-row' });
@@ -2662,7 +2664,7 @@ class SetupWizardModal extends Modal {
         const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
         nextBtn.addEventListener('click', () => this.goTo(this.step + 1));
       } catch (e) {
-        clearInterval(phraseTimer);
+        stopPhrases();
         progressWrap.style.display = 'none';
         body.createEl('p', { text: 'Error: ' + (e instanceof Error ? e.message : String(e)), cls: 'll-error' });
         ilBtn.disabled = !fieldReady; skipBtn.disabled = false;
@@ -2783,21 +2785,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const track    = wrap.createEl('div', { cls: 'll-progress-wrap' });
       const bar      = track.createEl('div', { cls: 'll-progress-bar' });
 
-      let phraseIdx   = Math.floor(Math.random() * phrases.length);
-      let phraseTimer: number | null = null;
-
-      const startPhrases = () => {
-        if (phraseTimer !== null) return;
-        phraseEl.setText(phrases[phraseIdx]);
-        phraseTimer = window.setInterval(() => {
-          phraseIdx = (phraseIdx + 1) % phrases.length;
-          phraseEl.style.opacity = '0';
-          setTimeout(() => {
-            phraseEl.setText(phrases[phraseIdx]);
-            phraseEl.style.opacity = '1';
-          }, 220);
-        }, 3500);
-      };
+      let stopPhrases: (() => void) | null = null;
 
       const show = (msg: string, pct: number) => {
         wrap.style.display = 'block';
@@ -2805,10 +2793,10 @@ class LinkLinkSettingTab extends PluginSettingTab {
         label.setText(msg);
         bar.style.width = pct + '%';
         bar.classList.toggle('indeterminate', pct === 0);
-        startPhrases();
+        if (stopPhrases === null) stopPhrases = startPhraseRotator(phraseEl, phrases, 3500, true);
       };
       const hide = (delay = 1800) => {
-        if (phraseTimer !== null) { clearInterval(phraseTimer); phraseTimer = null; }
+        stopPhrases?.(); stopPhrases = null;
         setTimeout(() => { wrap.style.display = 'none'; }, delay);
       };
       return { show, hide };
@@ -3504,10 +3492,6 @@ class LinkLinkSettingTab extends PluginSettingTab {
     // ── INTERLINK VAULT TAB ──────────────────────────────────────────────
 
     const renderInterlink = () => {
-      let showProg: (msg: string, pct: number) => void;
-      let hideProg: (delay?: number) => void;
-
-
       body.createEl('h3', { text: 'Exceptions' });
 
       filterSection(body.createEl('div', { cls: 'll-action-section ll-action-section-flat' }), app,
@@ -3604,10 +3588,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
       setIcon(clearBtn.createEl('span', { cls: 'll-btn-icon' }), 'eraser');
       clearBtn.createEl('span', { text: 'Clear related field' });
 
-      let showClearProg: (msg: string, pct: number) => void;
-      let hideClearProg: (delay?: number) => void;
-      ({ show: showProg, hide: hideProg } = makeProgress(ilSection, INTERLINK_PHRASES));
-      ({ show: showClearProg, hide: hideClearProg } = makeProgress(ilSection, CLEAR_PHRASES));
+      const { show: showProg,      hide: hideProg      } = makeProgress(ilSection, INTERLINK_PHRASES);
+      const { show: showClearProg, hide: hideClearProg } = makeProgress(ilSection, CLEAR_PHRASES);
 
       ilBtn.addEventListener('click', async () => {
         const existing = await this.plugin.interlinkService.findNotesWithRelated();

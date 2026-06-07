@@ -266,7 +266,6 @@ export class IndexingService {
 
   // ── mtime source ─────────────────────────────────────────────────────────
 
-  // Returns the modification timestamp for change-detection.
   // Returns the modification timestamp used for change detection.
   // In frontmatter mode, falls back to OS mtime when the field is absent or unparseable.
   private getFileMtime(file: TFile): number {

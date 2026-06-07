@@ -130,8 +130,6 @@ export class InterlinkService {
     return limited.map(s => s.title);
   }
 
-  // ── Frontmatter I/O ──────────────────────────────────────────────────────
-
   // ── Scan for existing field ───────────────────────────────────────────────
 
   async findNotesWithRelated(): Promise<TFile[]> {
@@ -145,7 +143,7 @@ export class InterlinkService {
     return result;
   }
 
-  // ── Main: interlink vault ─────────────────────────────────────────────────
+  // ── Interlink vault ───────────────────────────────────────────────────────
 
   async run(
     index: IndexEntry[],
