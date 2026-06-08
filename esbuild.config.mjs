@@ -18,10 +18,26 @@ const prod = process.argv[2] === 'production';
 // alias it to onnxruntime-web (the WASM backend). The WASM binaries
 // themselves are NOT bundled — they are fetched from CDN at runtime.
 //
-// Plain 'fs'/'path' inside @xenova/transformers are NOT externalized so
-// esbuild stubs them as empty objects (platform:browser default), keeping
-// RUNNING_LOCALLY=false and preventing the url.fileURLToPath crash that
-// occurs in Electron's renderer when import.meta.url is an app:// URL.
+// onnxruntime-web's pre-built bundle contains a Node.js code path that calls
+// require('fs') and require('path'). In Electron's renderer those calls would
+// succeed and give the ONNX runtime real filesystem access — which we don't
+// want and never need (models are fetched from CDN). This plugin intercepts
+// those two requires and returns empty stubs so the fs code path becomes a
+// no-op, while WASM/fetch loading continues to work normally.
+const stubNodeModulesPlugin = {
+  name: 'stub-node-modules',
+  setup(build) {
+    build.onResolve({ filter: /^(fs|path)$/ }, args => ({
+      path: args.path,
+      namespace: 'stub-node-modules',
+    }));
+    build.onLoad({ filter: /.*/, namespace: 'stub-node-modules' }, () => ({
+      contents: 'module.exports = {};',
+      loader: 'js',
+    }));
+  },
+};
+
 esbuild.build({
   entryPoints: ['main.ts'],
   bundle: true,
@@ -32,6 +48,7 @@ esbuild.build({
   sourcemap: prod ? false : 'inline',
   treeShaking: true,
   outfile: 'main.js',
+  plugins: [stubNodeModulesPlugin],
   alias: {
     'onnxruntime-node': onnxWebPath,
   },

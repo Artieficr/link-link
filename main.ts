@@ -926,11 +926,11 @@ class LinkLinkView extends ItemView {
               onDone(summary);
               progLabel.setText('Indexing complete!');
               bar.setCssStyles({ width: '100%' });
-              window.setTimeout(() => this.refresh(), 1500);
+              window.setTimeout(() => void this.refresh(), 1500);
             } catch (e) {
               onError();
               progLabel.setText(`Error: ${e instanceof Error ? e.message : String(e)}`);
-              window.setTimeout(() => this.refresh(), 4000);
+              window.setTimeout(() => void this.refresh(), 4000);
             } finally {
               btn.disabled = false;
               btn.setText('Index');
@@ -1669,7 +1669,7 @@ export default class LinkLinkPlugin extends Plugin {
         const raw = await adapter.read(filePath);
         const parsed: unknown = JSON.parse(raw);
         const rec = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : null;
-        if (rec && typeof rec['docs'] === 'object' && rec['docs'] !== null && 'docs' in (rec['docs'] as object)) {
+        if (rec && typeof rec['docs'] === 'object' && rec['docs'] !== null && 'docs' in rec['docs']) {
           results.push({ path: filePath, format: 'Copilot index' });
         } else if (Array.isArray(parsed) && parsed.length > 0 &&
                    typeof (parsed[0] as Record<string, unknown>)?.['embedding'] !== 'undefined') {
@@ -2122,7 +2122,7 @@ class SetupWizardModal extends Modal {
     if (this.wzOllamaId) { connBadge.setText('✓ Saved'); connBadge.addClass('ll-wiz-conn-ok'); }
 
     const footerRow = this.mkFooter(body);
-    const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' }) as HTMLButtonElement;
+    const nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
 
     const updateNext = () => {
       nextBtn.disabled = selected === 'local' && (!nameInput.value.trim() || !localVerified);
@@ -2702,7 +2702,9 @@ class LinkLinkSettingTab extends PluginSettingTab {
     this.progressDisplayTipEl?.remove(); this.progressDisplayTipEl = null;
   }
 
-  display() {
+  display() { this.renderSettings(); }
+
+  private renderSettings() {
     const { containerEl } = this;
     containerEl.empty();
     this.tooltipEl?.remove();              this.tooltipEl             = null;
@@ -2827,7 +2829,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           .onChange(v => { void (async () => {
             S.embeddingSource = v as LinkLinkSettings['embeddingSource'];
             await save();
-            this.display();
+            this.renderSettings();
           })(); })
         );
 
@@ -3458,7 +3460,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 showProg('Indexing complete!', 100);
                 hideProg();
                 this.plugin.refreshView();
-                window.setTimeout(() => rebuildDeleteGroup(), 2000);
+                window.setTimeout(() => void rebuildDeleteGroup(), 2000);
               } catch (e) {
                 onError();
                 showProg(`Error: ${e instanceof Error ? e.message : String(e)}`, 0);
