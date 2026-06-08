@@ -9,6 +9,7 @@
 No cloud services, no subscriptions, no data leaving your machine. Private by default.
 
 Same amount of notes on examples below. More semantic connections between related notes on the right!
+
 <img width="100%" alt="image" src="https://github.com/Artieficr/link-link/blob/main/.github/assets/interlink-vault.png" />
 
 
