@@ -71,7 +71,7 @@ Same amount of notes on examples below. More semantic connections between relate
 ### List view
 All features on the list view have a tooltip with a description of what this is, and what it does. Just hover your mouse over an element.
 
-<img width="50%" alt="image" src="https://github.com/Artieficr/link-link/blob/main/.github/assets/list-view-features.png" />
+<img width="70%" alt="image" src="https://github.com/Artieficr/link-link/blob/main/.github/assets/list-view-features.png" />
 
 1. **Interlink current note** — updates your frontmatter `related:` field with semantically similar notes from the index file.
 2. **Update panel** — side panel should update in a real time, but in case it would not pick up your recent action, you can force update it right now.
@@ -89,7 +89,7 @@ Notes with `B` or `O` badges are already connected to current note in their way.
 ### Graph view
 A non-obvious feature: drag and drop nodes onto the central node in the Graph view to link or unlink the grabbed note:
 
-<img width="50%" alt="image" src="https://github.com/Artieficr/link-link/blob/main/.github/assets/graph-view-drag-n-drop.gif" />
+<img width="100%" alt="image" src="https://github.com/Artieficr/link-link/blob/main/.github/assets/graph-view-drag-n-drop.gif" />
 
 Link Link! graph view replicates Obsidian's native Graph. It was intended to replace `Local Graph View` by showing more info and expanding linking functionality.
 
