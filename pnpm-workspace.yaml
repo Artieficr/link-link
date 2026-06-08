@@ -2,3 +2,6 @@ allowBuilds:
   esbuild: true
   protobufjs: false
   sharp: false
+
+overrides:
+  protobufjs: ^7.4.0
