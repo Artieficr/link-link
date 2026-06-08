@@ -18,7 +18,7 @@ Same amount of notes on examples below. More semantic connections between relate
 - **List view** — notes ranked by similarity score, most relevant on top. Each result has a color coded marker — green for the closest match, grey for the weakest, yellow in between. Spot a note worth linking? Drag it straight into the editor to paste a [[link]], or hit the connection icon to add or remove it from your related: field in one click.
 - **Graph view** — everything in list view, visualised as a graph in native Obsidian style. Connected notes cluster around the current one, unconnected but semantically similar notes float at the edges — ready to be pulled in. Drag a floating node onto the central note to connect it, or drag a connected node to central to disconnect it.
 - **Multiple embedding backends** — use what you already have:
-    - **Built-in (lightweight)** — uses local `bge-small-en-v1.5` via Transformers.js, runs fully offline with no extra setup. Install the plugin and just use it!
+    - **Built-in (lightweight)** — uses `bge-small-en-v1.5` via Transformers.js. Downloads automatically the first time you index your vault (~25 MB), then runs fully offline, with no additional setup required.
     - **Local model (Ollama)** — connect any locally-running [Ollama](https://ollama.com/) embedding model for full control and more powerful models. Add as many models as you like. Each gets its own index file, so you can compare and pick the one that works best for you.
     - **Existing index file** — it reads the existing index file if you have one and have set its path in the settings. Zero extra work if you already use an embedding model any where in your vault.
 - **Interlink Current Note** — writes a `related:` frontmatter field to the currently open note only, connecting it to its most semantically similar notes. Available as a panel button and a command palette entry.
@@ -107,7 +107,8 @@ ONLY `related:` FIELD IS MODIFIED. Other notes' content stays untouched.
 
 ## Privacy
 
-Everything runs on your machine. No notes, embeddings, or metadata are ever sent anywhere. Cloud API calls are intentionally not implemented — this plugin works fully offline.
+Everything runs on your machine. No notes, embeddings, or metadata are ever sent anywhere.
+The built-in model downloads once on first index (~25 MB) and is cached locally — after that, no network connection is ever required, plugin runs fully offline.
 
 ## Contributing
 I'm not a software engineer — I created this plugin for myself with the help of [Claude Code](https://claude.com/product/claude-code).

@@ -736,11 +736,11 @@ class LinkLinkView extends ItemView {
           hideTip = showListTip(btn, tipTitle, tipBody, tipAlign);
         });
         btn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => void (async () => {
           hideTip?.(); hideTip = null;
           btn.addClass('ll-icon-btn-busy');
           try { await onClick(); } finally { btn.removeClass('ll-icon-btn-busy'); }
-        });
+        })());
         return btn;
       };
 
@@ -786,11 +786,11 @@ class LinkLinkView extends ItemView {
       });
       const knob = toggle.createEl('div', { cls: 'll-view-toggle-knob' });
       setIcon(knob, isGraph ? 'network' : 'list');
-      toggle.addEventListener('click', async () => {
+      toggle.addEventListener('click', () => void (async () => {
         this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
         await this.plugin.saveData(this.plugin.settings);
         await this.refresh();
-      });
+      })());
 
       if (results.length === 0) {
         el.createEl('p', {
@@ -880,7 +880,7 @@ class LinkLinkView extends ItemView {
       progLabel.setCssStyles({ display: 'none' });
       const bar = progressWrap.createEl('div', { cls: 'll-progress-bar' });
 
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => void (async () => {
         btn.disabled = true;
         let confirmMsg: string;
         try {
@@ -937,7 +937,7 @@ class LinkLinkView extends ItemView {
             }
           }
         ).open();
-      });
+      })());
     }
   }
 
@@ -999,7 +999,7 @@ class LinkLinkView extends ItemView {
       // ── Related field toggle ──────────────────────────────────────────────
       const getRelated = (): string[] => {
         const fm = this.app.metadataCache.getFileCache(activeFile)?.frontmatter;
-        const val = fm?.[field];
+        const val: unknown = fm?.[field];
         if (!val) return [];
         return Array.isArray(val) ? val.map(String) : [String(val)];
       };
@@ -1034,7 +1034,7 @@ class LinkLinkView extends ItemView {
       });
       linkBtn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
 
-      linkBtn.addEventListener('click', async () => {
+      linkBtn.addEventListener('click', () => void (async () => {
         if (isInFrontmatter) {
           await this.app.fileManager.processFrontMatter(activeFile, (fm: Record<string, unknown>) => {
             const current = getRelated();
@@ -1053,7 +1053,7 @@ class LinkLinkView extends ItemView {
           isInFrontmatter = true;
           refreshBtn();
         }
-      });
+      })());
 
       // Per-item updater for real-time badge/button refresh via metadataCache.changed
       itemUpdaters.push((newOutgoingPaths: Set<string>, newBacklinkPaths: Set<string>) => {
@@ -1153,8 +1153,9 @@ class LinkLinkView extends ItemView {
         const field = this.plugin.settings.relatedFieldName || 'related';
         const getRelated = (): string[] => {
           const fm = this.app.metadataCache.getFileCache(currentFile)?.frontmatter;
-          if (!fm?.[field]) return [];
-          return Array.isArray(fm[field]) ? fm[field] : [String(fm[field])];
+          const raw: unknown = fm?.[field];
+          if (!raw) return [];
+          return Array.isArray(raw) ? raw.map(String) : [String(raw)];
         };
         const isInFrontmatter = getRelated().some(r => r === `[[${f.basename}]]`);
         const entry = results.find(r => r.file.path === f.path);
@@ -1606,7 +1607,7 @@ export default class LinkLinkPlugin extends Plugin {
 
   refreshView() {
     const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
-    if (leaf?.view instanceof LinkLinkView) leaf.view.refresh();
+    if (leaf?.view instanceof LinkLinkView) void leaf.view.refresh();
   }
 
   updateViewBadges(file: TFile) {
@@ -1666,10 +1667,12 @@ export default class LinkLinkPlugin extends Plugin {
       if (!filePath.endsWith('.json')) continue;
       try {
         const raw = await adapter.read(filePath);
-        const parsed = JSON.parse(raw);
-        if (parsed?.docs?.docs && typeof parsed.docs.docs === 'object') {
+        const parsed: unknown = JSON.parse(raw);
+        const rec = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : null;
+        if (rec && typeof rec['docs'] === 'object' && rec['docs'] !== null && 'docs' in (rec['docs'] as object)) {
           results.push({ path: filePath, format: 'Copilot index' });
-        } else if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.embedding) {
+        } else if (Array.isArray(parsed) && parsed.length > 0 &&
+                   typeof (parsed[0] as Record<string, unknown>)?.['embedding'] !== 'undefined') {
           results.push({ path: filePath, format: 'Link-link index' });
         }
       } catch { /* skip unreadable files */ }
@@ -1892,11 +1895,11 @@ function filterSection(
         setIcon(iconEl, v.endsWith('/') ? 'folder' : 'file-text');
         chip.createEl('span', { text: v, cls: 'll-chip-text' });
         const x = chip.createEl('button', { cls: 'll-chip-x', text: '×' });
-        x.addEventListener('click', async () => {
+        x.addEventListener('click', () => void (async () => {
           values.splice(values.indexOf(v), 1);
           await onChange([...values]);
           renderChips();
-        });
+        })());
       }
     }
   };
@@ -1919,10 +1922,10 @@ function filterSection(
 // ─── Ollama model modal ───────────────────────────────────────────────────────
 
 class OllamaModelModal extends Modal {
-  private onSave: (modelName: string, displayName: string, baseUrl: string) => void;
+  private onSave: (modelName: string, displayName: string, baseUrl: string) => void | Promise<void>;
   private existing?: OllamaModel;
 
-  constructor(app: App, existing: OllamaModel | undefined, onSave: (modelName: string, displayName: string, baseUrl: string) => void) {
+  constructor(app: App, existing: OllamaModel | undefined, onSave: (modelName: string, displayName: string, baseUrl: string) => void | Promise<void>) {
     super(app);
     this.existing = existing;
     this.onSave = onSave;
@@ -1979,7 +1982,7 @@ class OllamaModelModal extends Modal {
         return;
       }
       nameErr.setCssStyles({ display: 'none' });
-      this.onSave(mn, dispInput.value.trim(), urlInput.value.trim());
+      void this.onSave(mn, dispInput.value.trim(), urlInput.value.trim());
       this.close();
     };
 
@@ -2089,7 +2092,7 @@ class SetupWizardModal extends Modal {
     body.createEl('div', { text: 'Choose embedding model', cls: 'll-wiz-title' });
 
     const MODELS: { id: 'builtin' | 'local' | 'existing'; label: string; desc: string; req: string }[] = [
-      { id: 'builtin',  label: 'Built-in (lightweight)', desc: 'A compact model shipped with the plugin. No setup required, runs fully offline.', req: 'No requirements' },
+      { id: 'builtin',  label: 'Built-in (lightweight)', desc: 'Downloads automatically the first time you index your vault (~25 MB), then runs fully offline, with no additional setup required.', req: 'No requirements' },
       { id: 'local',    label: 'Local model (Ollama)',   desc: 'Use a locally-running Ollama server for more powerful models and full control.',    req: 'Requires Ollama installed and running' },
       { id: 'existing', label: 'Existing index file',    desc: 'Reuse an embedding index already in your vault (e.g. from the Copilot plugin).',   req: 'Another plugin must have already indexed your vault' },
     ];
@@ -2100,20 +2103,20 @@ class SetupWizardModal extends Modal {
     // Ollama inline form
     const ollamaWrap = body.createEl('div', { cls: 'll-wiz-ollama-wrap' });
     ollamaWrap.setCssStyles({ display: selected === 'local' ? '' : 'none' });
-    const nameInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    const nameInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' });
     nameInput.placeholder = 'Model name (e.g. bge-m3)';
     nameInput.value = this.wzOllamaName;
     const nameErr = ollamaWrap.createEl('p', { cls: 'll-modal-error' });
     nameErr.setCssStyles({ display: 'none' });
-    const dispInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    const dispInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' });
     dispInput.placeholder = 'Display name (optional)';
     dispInput.value = this.wzOllamaDisplay;
-    const urlInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    const urlInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' });
     urlInput.placeholder = 'Base URL (default: http://localhost:11434)';
     urlInput.value = this.wzOllamaUrl;
     ollamaWrap.createEl('p', { text: 'Leave URL blank unless using a proxy.', cls: 'll-modal-hint' });
     const connRow = ollamaWrap.createEl('div', { cls: 'll-wiz-conn-row' });
-    const checkBtn = connRow.createEl('button', { text: 'Check connection', cls: 'll-action-btn ll-action-btn-secondary' }) as HTMLButtonElement;
+    const checkBtn = connRow.createEl('button', { text: 'Check connection', cls: 'll-action-btn ll-action-btn-secondary' });
     const connBadge = connRow.createEl('span', { cls: 'll-wiz-conn-badge' });
     let localVerified = !!this.wzOllamaId; // pre-verified if a model was already saved
     if (this.wzOllamaId) { connBadge.setText('✓ Saved'); connBadge.addClass('ll-wiz-conn-ok'); }
@@ -2127,7 +2130,7 @@ class SetupWizardModal extends Modal {
     updateNext();
     nameInput.addEventListener('input', () => { localVerified = false; updateNext(); });
 
-    checkBtn.addEventListener('click', async () => {
+    checkBtn.addEventListener('click', () => void (async () => {
       const mn = nameInput.value.trim();
       if (!mn) { nameErr.setText('Model name is required.'); nameErr.setCssStyles({ display: 'block' }); return; }
       nameErr.setCssStyles({ display: 'none' });
@@ -2145,9 +2148,9 @@ class SetupWizardModal extends Modal {
         updateNext();
       } catch { connBadge.setText('✗ Unreachable'); connBadge.addClass('ll-wiz-conn-fail'); localVerified = false; updateNext(); }
       finally { checkBtn.disabled = false; checkBtn.setText('Check connection'); }
-    });
+    })());
 
-    nextBtn.addEventListener('click', async () => {
+    nextBtn.addEventListener('click', () => void (async () => {
       if (selected === 'local') {
         const mn = nameInput.value.trim();
         if (!mn) { nameErr.setText('Model name is required.'); nameErr.setCssStyles({ display: 'block' }); nameInput.focus(); return; }
@@ -2167,7 +2170,7 @@ class SetupWizardModal extends Modal {
       this.chosenModel = selected;
       await this.save();
       this.goTo(2);
-    });
+    })());
 
     for (const m of MODELS) {
       const card = cards.createEl('div', { cls: 'll-wiz-card' + (selected === m.id ? ' selected' : '') });
@@ -2223,11 +2226,11 @@ class SetupWizardModal extends Modal {
 
     for (const [val, label] of [['exclude', 'Exclude'], ['include', 'Only include']] as const) {
       const btn = modeRow.createEl('button', { cls: 'll-mode-btn' + (S.indexMode === val ? ' active' : ''), text: label });
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => void (async () => {
         S.indexMode = val; await this.save();
         modeRow.querySelectorAll('.ll-mode-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active'); updateModeDesc(); renderFilter();
-      });
+      })());
     }
 
     const row = this.mkFooter(body);
@@ -2247,7 +2250,7 @@ class SetupWizardModal extends Modal {
     const detectedWrap = body.createEl('div', { cls: 'll-detected-wrap' });
     const detectedHeader = detectedWrap.createEl('div', { cls: 'll-detected-header' });
     detectedHeader.createEl('span', { text: 'Auto-detected index files', cls: 'll-detected-title' });
-    const scanBtn = detectedHeader.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' }) as HTMLButtonElement;
+    const scanBtn = detectedHeader.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
     setIcon(scanBtn.createEl('span', { cls: 'll-btn-icon' }), 'search');
     scanBtn.createEl('span', { text: 'Scan' });
     const detectedList = detectedWrap.createEl('div', { cls: 'll-detected-list' });
@@ -2261,16 +2264,16 @@ class SetupWizardModal extends Modal {
       if (!files.length) { detectedList.createEl('p', { text: 'No index files found.', cls: 'll-detected-empty' }); return; }
       for (const f of files) {
         const row = detectedList.createEl('div', { cls: 'll-detected-row' });
-        const cb = row.createEl('input') as HTMLInputElement; cb.type = 'checkbox'; cb.checked = S.existingIndexPath === f.path;
+        const cb = row.createEl('input'); cb.type = 'checkbox'; cb.checked = S.existingIndexPath === f.path;
         const lbl = row.createEl('span', { cls: 'll-detected-path' });
         lbl.createEl('span', { text: f.path, cls: 'll-detected-path-text' });
         lbl.createEl('span', { text: f.format, cls: 'll-detected-format' });
-        cb.addEventListener('change', async () => {
+        cb.addEventListener('change', () => void (async () => {
           S.existingIndexPath = cb.checked ? f.path : '';
           if (cb.checked) detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { if (c !== cb) c.checked = false; });
           if (pathInput) pathInput.value = S.existingIndexPath;
           updateNext(); await this.save();
-        });
+        })());
       }
       if (S.existingIndexPath) {
         readyNote.setCssStyles({ display: '' });
@@ -2284,14 +2287,14 @@ class SetupWizardModal extends Modal {
 
     new Setting(body).setName('Index file path').addText(t => {
       t.setPlaceholder(`${this.app.vault.configDir}/<path-to-your-index-file>`).setValue(S.existingIndexPath)
-       .onChange(async v => {
+       .onChange(v => { void (async () => {
          S.existingIndexPath = v;
          detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
          readyNote.setCssStyles({ display: v.trim() ? '' : 'none' });
          if (v.trim()) readyNote.setText('✓ Index file ready — no additional indexing needed.');
          updateNext(); await this.save();
-       });
-      pathInput = t.inputEl as HTMLInputElement;
+       })(); });
+      pathInput = t.inputEl;
     });
 
     const runScan = async () => {
@@ -2307,9 +2310,9 @@ class SetupWizardModal extends Modal {
 
     // Footer always last so it renders below all content
     const footerRow = this.mkFooter(body);
-    nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' }) as HTMLButtonElement;
+    nextBtn = footerRow.createEl('button', { text: 'Continue →', cls: 'll-action-btn ll-action-btn-accent' });
     nextBtn.disabled = !S.existingIndexPath.trim();
-    nextBtn.addEventListener('click', async () => { await this.save(); this.goTo(3); });
+    nextBtn.addEventListener('click', () => void (async () => { await this.save(); this.goTo(3); })());
   }
 
   // ── Step 3b: Index vault (builtin/local) ─────────────────────────────────
@@ -2349,7 +2352,7 @@ class SetupWizardModal extends Modal {
     const skipBtn = footerRow.createEl('button', { text: 'Skip for now →', cls: 'll-action-btn ll-action-btn-secondary' });
     skipBtn.addEventListener('click', () => this.goTo(this.step + 1));
 
-    idxBtn.addEventListener('click', async () => {
+    idxBtn.addEventListener('click', () => void (async () => {
       idxBtn.disabled = true; skipBtn.disabled = true;
       progressWrap.setCssStyles({ display: '' });
       isIndexing = true;
@@ -2379,7 +2382,7 @@ class SetupWizardModal extends Modal {
       } finally {
         isIndexing = false;
       }
-    });
+    })());
   }
 
   // ── Interlink step (step 4 for builtin/local, step 3 for existing) ────────
@@ -2400,7 +2403,7 @@ class SetupWizardModal extends Modal {
     const statusWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-status' });
     const choiceWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-choice' });
     const fieldInputWrap = fieldSection.createEl('div', { cls: 'll-wiz-field-input-wrap' });
-    const fieldInput     = fieldInputWrap.createEl('input', { type: 'text', cls: 'll-modal-input' }) as HTMLInputElement;
+    const fieldInput     = fieldInputWrap.createEl('input', { type: 'text', cls: 'll-modal-input' });
     const fieldErr       = fieldInputWrap.createEl('p', { cls: 'll-modal-error' }); fieldErr.setCssStyles({ display: 'none' });
     const fieldDesc      = fieldInputWrap.createEl('p', { cls: 'll-modal-hint' }); fieldDesc.setCssStyles({ display: 'none' });
     const statusNote     = fieldSection.createEl('p', { cls: 'll-modal-hint' }); statusNote.setCssStyles({ display: 'none' });
@@ -2411,14 +2414,14 @@ class SetupWizardModal extends Modal {
     fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
       fieldInput.value = lastValidField; fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
     });
-    fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', async () => {
+    fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', () => void (async () => {
       const pending = fieldConfirmRow.dataset['pending'] ?? '';
       lastValidField = pending; S.relatedFieldName = pending; await this.save();
       fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       statusNote.setText('Will use \u201c' + (pending || 'related') + ':\u201d frontmatter field when interlinking.');
       statusNote.setCssStyles({ display: '' });
       setFieldReady(true);
-    });
+    })());
 
     // Interlink action area
     body.createEl('div', { cls: 'll-section-sep' });
@@ -2467,7 +2470,7 @@ class SetupWizardModal extends Modal {
       if (err) fieldErr.setText(err);
       if (fieldInput.value.trim()) fieldDesc.setCssStyles({ display: 'none' });
     });
-    fieldInput.addEventListener('blur', async () => {
+    fieldInput.addEventListener('blur', () => void (async () => {
       const v = fieldInput.value.trim();
       const err = validateFmFieldName(v);
       if (err) { fieldInput.value = lastValidField; fieldErr.setCssStyles({ display: 'none' }); return; }
@@ -2512,10 +2515,10 @@ class SetupWizardModal extends Modal {
         setFieldReady(false);
         return;
       }
-    });
+    })());
 
     // ── Async scan vault ────────────────────────────────────────────────
-    (async () => {
+    void (async () => {
       let connectedCount = 0;
       for (const file of this.app.vault.getMarkdownFiles()) {
         const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
@@ -2646,7 +2649,7 @@ class SetupWizardModal extends Modal {
       }
     };
 
-    ilBtn.addEventListener('click', async () => {
+    ilBtn.addEventListener('click', () => void (async () => {
       const field   = S.relatedFieldName || 'related';
       const existing = await this.plugin.interlinkService.findNotesWithRelated();
       if (existing.length > 0) {
@@ -2656,7 +2659,7 @@ class SetupWizardModal extends Modal {
           runInterlink
         ).open();
       } else { await runInterlink(); }
-    });
+    })());
   }
   // ── Done ─────────────────────────────────────────────────────────────────
   private renderDone(body: HTMLElement) {
@@ -2781,14 +2784,14 @@ class LinkLinkSettingTab extends PluginSettingTab {
         cls: 'll-reset-btn', title: 'Reset to default',
       });
       setIcon(btn, 'rotate-ccw');
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => void (async () => {
         (S as Record<keyof LinkLinkSettings, unknown>)[key] = DEFAULT_SETTINGS[key];
         await save();
-        const scroller = containerEl.closest('.vertical-tab-content') as HTMLElement | null;
+        const scroller = containerEl.closest<HTMLElement>('.vertical-tab-content');
         const scrollTop = scroller?.scrollTop ?? 0;
         switchTab(activeTab);
         window.requestAnimationFrame(() => { if (scroller) scroller.scrollTop = scrollTop; });
-      });
+      })());
     };
 
     const slider = (
@@ -2798,7 +2801,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const s = new Setting(parent).setName(name).setDesc(desc)
         .addSlider(sl => sl.setLimits(min, max, step)
           .setValue(S[key] as number).setDynamicTooltip()
-          .onChange(async v => { (S as Record<keyof LinkLinkSettings, unknown>)[key] = v; await save(); }));
+          .onChange(v => { void (async () => { (S as Record<keyof LinkLinkSettings, unknown>)[key] = v; await save(); })(); }));
       addReset(s, key);
       return s;
     };
@@ -2821,11 +2824,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
             existing: 'Existing index file',
           })
           .setValue(S.embeddingSource)
-          .onChange(async v => {
+          .onChange(v => { void (async () => {
             S.embeddingSource = v as LinkLinkSettings['embeddingSource'];
             await save();
             this.display();
-          })
+          })(); })
         );
 
       // ? tooltip
@@ -2833,7 +2836,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const tip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
       this.tooltipEl = tip;
       for (const [title, body] of [
-        ['Built-in (lightweight)', 'A compact model shipped with the plugin. Runs fully offline with no downloads required.'],
+        ['Built-in (lightweight)', 'Downloads automatically the first time you index your vault (~25 MB), then runs fully offline, with no additional setup required.'],
         ['Local model (Ollama)',   'Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.'],
         ['Existing index file',   'Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.'],
       ] as [string, string][]) {
@@ -2898,12 +2901,12 @@ class LinkLinkSettingTab extends PluginSettingTab {
               chk.type = 'checkbox'; chk.checked = model.active;
               chk.className = 'll-model-active-chk';
               chk.title = 'Set as active model';
-              chk.addEventListener('change', async () => {
+              chk.addEventListener('change', () => void (async () => {
                 if (!chk.checked) { chk.checked = true; return; }
                 for (const m of S.ollamaModels) m.active = m.id === model.id;
                 await save();
                 renderModels();
-              });
+              })());
 
               // Display name
               row.createEl('div', { cls: 'll-model-name', text: model.displayName || model.modelName });
@@ -2914,7 +2917,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
               // Check connection cell
               const connCell = row.createEl('div', { cls: 'll-model-conn-cell' });
               const checkBtn = connCell.createEl('button', { cls: 'll-model-check-btn', text: 'Check' });
-              checkBtn.addEventListener('click', async () => {
+              checkBtn.addEventListener('click', () => void (async () => {
                 checkBtn.disabled = true;
                 checkBtn.setText('Checking…');
                 connCell.querySelector('.ll-conn-badge')?.remove();
@@ -2953,7 +2956,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                   checkBtn.disabled = false;
                   checkBtn.setText('Check');
                 }
-              });
+              })());
 
               // Edit button
               const editBtn = row.createEl('button', { cls: 'll-model-icon-btn', title: 'Edit model' });
@@ -3017,13 +3020,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
           }
           for (const f of files) {
             const row = detectedList.createEl('div', { cls: 'll-detected-row' });
-            const cb = row.createEl('input') as HTMLInputElement;
+            const cb = row.createEl('input');
             cb.type = 'checkbox';
             cb.checked = S.existingIndexPath === f.path;
             const label = row.createEl('span', { cls: 'll-detected-path' });
             label.createEl('span', { text: f.path, cls: 'll-detected-path-text' });
             label.createEl('span', { text: f.format, cls: 'll-detected-format' });
-            cb.addEventListener('change', async () => {
+            cb.addEventListener('change', () => void (async () => {
               if (!cb.checked) {
                 S.existingIndexPath = '';
               } else {
@@ -3034,7 +3037,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
               if (pathInput) pathInput.value = S.existingIndexPath;
               validationEl.setCssStyles({ display: S.existingIndexPath ? 'none' : '' });
               await save();
-            });
+            })());
           }
         };
 
@@ -3051,11 +3054,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
           }
         };
 
-        scanBtn.addEventListener('click', async () => {
+        scanBtn.addEventListener('click', () => void (async () => {
           const found = await runScan();
           S.detectedIndexFiles = found;
           await save();
-        });
+        })());
 
         // On open: show stored list, pruning any files no longer on disk
         const initList = async () => {
@@ -3080,7 +3083,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             detectedList.createEl('p', { text: 'Press Scan to detect index files.', cls: 'll-detected-empty' });
           }
         };
-        initList();
+        void initList();
 
         // ── manual path ──────────────────────────────────────────────────
         new Setting(body)
@@ -3088,13 +3091,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
           .addText(t => {
             t.setPlaceholder(`${this.app.vault.configDir}/<path-to-your-index-file>`)
              .setValue(S.existingIndexPath)
-             .onChange(async v => {
+             .onChange(v => { void (async () => {
                S.existingIndexPath = v;
                // uncheck all detected rows when typing manually
                detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { c.checked = false; });
                validationEl.setCssStyles({ display: v.trim() ? 'none' : '' });
                await save();
-             });
+             })(); });
             pathInput = t.inputEl;
           });
 
@@ -3145,14 +3148,14 @@ class LinkLinkSettingTab extends PluginSettingTab {
             cls: 'll-mode-btn' + (S.indexMode === val ? ' active' : ''),
             text: label,
           });
-          btn.addEventListener('click', async () => {
+          btn.addEventListener('click', () => void (async () => {
             S.indexMode = val;
             await save();
             modeRow.querySelectorAll('.ll-mode-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             updateModeDesc();
             renderTargetFilter();
-          });
+          })());
         }
       }
 
@@ -3174,10 +3177,10 @@ class LinkLinkSettingTab extends PluginSettingTab {
               'file-save': 'On file save',
             })
             .setValue(S.autoIndexMode)
-            .onChange(async v => {
+            .onChange(v => { void (async () => {
               S.autoIndexMode = v as LinkLinkSettings['autoIndexMode'];
               await save();
-            })
+            })(); })
           );
 
         const autoIdxHelpBtn = autoIdxSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
@@ -3228,11 +3231,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
               'frontmatter': 'Custom frontmatter field',
             })
             .setValue(S.mtimeSource)
-            .onChange(async v => {
+            .onChange(v => { void (async () => {
               S.mtimeSource = v as LinkLinkSettings['mtimeSource'];
               await save();
               fieldWrap.setCssStyles({ display: v === 'frontmatter' ? '' : 'none' });
-            })
+            })(); })
           );
 
         // ? tooltip on the setting name (same pattern as Embedding model)
@@ -3263,7 +3266,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           .addText(t => t
             .setPlaceholder('updated')
             .setValue(S.mtimeField)
-            .onChange(async v => { S.mtimeField = v; await save(); })
+            .onChange(v => { void (async () => { S.mtimeField = v; await save(); })(); })
           );
 
         // Indexing progress display
@@ -3276,10 +3279,10 @@ class LinkLinkSettingTab extends PluginSettingTab {
               'silent':       'Silent',
             })
             .setValue(S.progressDisplay)
-            .onChange(async v => {
+            .onChange(v => { void (async () => {
               S.progressDisplay = v as LinkLinkSettings['progressDisplay'];
               await save();
-            })
+            })(); })
           );
 
         const progDispHelpBtn = progDispSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
@@ -3323,7 +3326,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           const loadStat = async (path: string): Promise<{ exists: boolean; count: number }> => {
             try {
               const raw = await this.app.vault.adapter.read(path);
-              const arr = JSON.parse(raw);
+              const arr: unknown = JSON.parse(raw);
               return { exists: true, count: Array.isArray(arr) ? arr.length : 0 };
             } catch { return { exists: false, count: 0 }; }
           };
@@ -3388,7 +3391,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             ).open();
           });
         };
-        rebuildDeleteGroup();
+        void rebuildDeleteGroup();
         ({ show: showProg, hide: hideProg } = makeProgress(idxSection));
 
         // Restore indexing defaults
@@ -3399,7 +3402,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           .addButton(btn => {
             btn.setButtonText('Restore defaults');
             btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
-            btn.onClick(async () => {
+            btn.onClick(() => void (async () => {
               const keys: (keyof LinkLinkSettings)[] = [
                 'autoIndexMode', 'mtimeSource', 'mtimeField',
                 'progressDisplay', 'notificationTimeout',
@@ -3411,10 +3414,10 @@ class LinkLinkSettingTab extends PluginSettingTab {
               await save();
               body.empty();
               renderEmbedding();
-            });
+            })());
           });
 
-        idxBtn.addEventListener('click', async () => {
+        idxBtn.addEventListener('click', () => void (async () => {
           idxBtn.disabled = true;
           let confirmMsg: string;
           try {
@@ -3463,7 +3466,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
               } finally { idxBtn.disabled = false; }
             }
           ).open();
-        });
+        })());
       }
     };
 
@@ -3513,7 +3516,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             fieldErrEl.setCssStyles({ display: err ? 'block' : 'none' });
             if (err) fieldErrEl.setText(err);
           });
-          input.addEventListener('blur', async () => {
+          input.addEventListener('blur', () => void (async () => {
             const v = input.value.trim();
             const err = validateFmFieldName(v);
             if (err) { input.value = lastValidRelatedField; fieldErrEl.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' }); return; }
@@ -3527,7 +3530,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
               else { fieldErrEl.setCssStyles({ display: 'none' }); }
             } else { fieldErrEl.setCssStyles({ display: 'none' }); }
             lastValidRelatedField = v; S.relatedFieldName = v; await save();
-          });
+          })());
         });
       const fieldErrEl = body.createEl('p', { cls: 'll-modal-error' }); fieldErrEl.setCssStyles({ display: 'none' });
       const fieldConfirmRow = body.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
@@ -3536,12 +3539,12 @@ class LinkLinkSettingTab extends PluginSettingTab {
         if (input) input.value = lastValidRelatedField;
         fieldErrEl.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       });
-      fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', async () => {
+      fieldConfirmRow.createEl('button', { text: 'I understand. Confirm.', cls: 'll-action-btn ll-action-btn-danger' }).addEventListener('click', () => void (async () => {
         const input = fieldSetting.controlEl.querySelector('input') as HTMLInputElement;
         const v = input?.value.trim() ?? '';
         lastValidRelatedField = v; S.relatedFieldName = v; await save();
         fieldErrEl.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
-      });
+      })());
 
       new Setting(body).setName('Run interlink').setHeading();
 
@@ -3569,7 +3572,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       const { show: showProg,      hide: hideProg      } = makeProgress(ilSection, INTERLINK_PHRASES);
       const { show: showClearProg, hide: hideClearProg } = makeProgress(ilSection, CLEAR_PHRASES);
 
-      ilBtn.addEventListener('click', async () => {
+      ilBtn.addEventListener('click', () => void (async () => {
         const existing = await this.plugin.interlinkService.findNotesWithRelated();
         const proceed  = async () => {
           ilBtn.disabled = true; clearBtn.disabled = true;
@@ -3594,7 +3597,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             proceed
           ).open();
         } else { await proceed(); }
-      });
+      })());
 
       clearBtn.addEventListener('click', () => {
         new ConfirmModal(app,
@@ -3624,7 +3627,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addButton(btn => {
           btn.setButtonText('Restore defaults');
           btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
-          btn.onClick(async () => {
+          btn.onClick(() => void (async () => {
             const keys: (keyof LinkLinkSettings)[] = [
               'topN', 'threshold', 'relatedFieldName',
             ];
@@ -3634,7 +3637,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             await save();
             body.empty();
             renderInterlink();
-          });
+          })());
         });
     };
 
@@ -3649,7 +3652,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addDropdown(d => d
           .addOptions({ list: 'List', graph: 'Graph' })
           .setValue(S.viewMode)
-          .onChange(async v => { S.viewMode = v as 'list' | 'graph'; await save(); })
+          .onChange(v => { void (async () => { S.viewMode = v as 'list' | 'graph'; await save(); })(); })
         );
 
       new Setting(body)
@@ -3662,7 +3665,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             'split':   'Open to the right',
           })
           .setValue(S.openMode)
-          .onChange(async v => { S.openMode = v as LinkLinkSettings['openMode']; await save(); })
+          .onChange(v => { void (async () => { S.openMode = v as LinkLinkSettings['openMode']; await save(); })(); })
         );
 
       const addColor = (name: string, desc: string, key: 'colorHigh' | 'colorMid' | 'colorLow') => {
@@ -3671,7 +3674,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         inp.type  = 'color';
         inp.value = S[key];
         inp.setCssStyles({ cursor: 'pointer', border: 'none', background: 'none', width: '36px', height: '28px', padding: '2px' });
-        inp.addEventListener('input', async () => { S[key] = inp.value; await save(); });
+        inp.addEventListener('input', () => { void (async () => { S[key] = inp.value; await save(); })(); });
         addReset(s, key);
       };
       addColor('High similarity color', 'Top third of the score range above threshold.', 'colorHigh');
@@ -3681,7 +3684,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       new Setting(body)
         .setName('Auto-fit graph')
         .setDesc('Returns to fit-all 5sec after manual zoom or pan.')
-        .addToggle(t => t.setValue(S.autoFit).onChange(async v => { S.autoFit = v; await save(); }));
+        .addToggle(t => t.setValue(S.autoFit).onChange(v => { void (async () => { S.autoFit = v; await save(); })(); }));
 
       slider(body, 'Text fade threshold', 'Zoom below which labels fade out.',  'textFadeThreshold', 0.1, 2,   0.05);
       slider(body, 'Node size',           'Multiplier for all node sizes.',      'nodeSizeMultiplier', 0.5, 3,  0.1);
@@ -3701,7 +3704,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addButton(btn => {
           btn.setButtonText('Restore defaults');
           btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
-          btn.onClick(async () => {
+          btn.onClick(() => void (async () => {
             const keys: (keyof LinkLinkSettings)[] = [
               'viewMode', 'colorHigh', 'colorMid', 'colorLow', 'autoFit',
               'textFadeThreshold', 'nodeSizeMultiplier', 'lineSizeMultiplier',
@@ -3712,7 +3715,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             await save();
             body.empty();
             renderGraph();
-          });
+          })());
         });
     };
 

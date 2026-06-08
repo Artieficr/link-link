@@ -7,7 +7,7 @@ import type { IndexEntry } from './indexing';
 export class ConfirmModal extends Modal {
   private message: string;
   private detail: string;
-  private onConfirm: () => void;
+  private onConfirm: () => void | Promise<void>;
   private confirmText: string;
   private destructive: boolean;
 
@@ -17,7 +17,7 @@ export class ConfirmModal extends Modal {
     app: App,
     message: string,
     detail: string,
-    onConfirm: () => void,
+    onConfirm: () => void | Promise<void>,
     confirmText = 'Continue',
     destructive = false,
     cancelText = 'Cancel'
@@ -41,7 +41,7 @@ export class ConfirmModal extends Modal {
       text: this.confirmText,
       cls: this.destructive ? 'll-btn-danger' : 'll-btn-accent'
     });
-    ok.addEventListener('click', () => { this.close(); this.onConfirm(); });
+    ok.addEventListener('click', () => { this.close(); void this.onConfirm(); });
   }
 
   onClose() { this.contentEl.empty(); }

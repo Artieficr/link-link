@@ -1,15 +1,10 @@
-/// <reference types="node" />
-import * as nFs   from 'node:fs';
-import * as nPath from 'node:path';
-import { App, FileSystemAdapter, Notice, TFile, requestUrl } from 'obsidian';
+import { App, Notice, TFile, requestUrl } from 'obsidian';
 import type LinkLinkPlugin from './main';
 
 // @xenova/transformers has no public TypeScript types; these minimal interfaces
 // cover the subset we actually call.
 type EmbedderFn = (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: ArrayLike<number> }>;
 interface ModelLoadProgress { status: string; file?: string; progress?: number; }
-// onnxruntime-web's WASM backend config is not exported — use a local interface.
-interface OnnxWasmConfig { wasmPaths?: Record<string, string>; numThreads?: number; }
 
 export interface IndexEntry {
   path: string;
@@ -32,18 +27,6 @@ export class IndexingService {
 
   private get pluginDir(): string {
     return this.plugin.manifest.dir ?? `${this.app.vault.configDir}/plugins/link-link`;
-  }
-
-  private get pluginAbsPath(): string {
-    const adapter = this.app.vault.adapter;
-    if (adapter instanceof FileSystemAdapter) {
-      return `${adapter.getBasePath()}/${this.pluginDir}`;
-    }
-    return this.pluginDir;
-  }
-
-  private get modelsDir(): string {
-    return `${this.pluginAbsPath}/models`;
   }
 
   private async ensureOllama(onProgress: (msg: string, pct: number) => void): Promise<boolean> {
@@ -87,52 +70,11 @@ export class IndexingService {
       // @ts-ignore
       const { pipeline, env } = await import('@xenova/transformers');
 
-      // nFs / nPath are statically imported at the top of this file with the
-      // 'node:' prefix, so esbuild emits require('node:fs') / require('node:path')
-      // in the CJS bundle — real Electron/Node.js modules, not esbuild stubs.
-      // Plain 'fs'/'path' inside @xenova/transformers remain as esbuild stubs
-      // (platform:browser), keeping RUNNING_LOCALLY=false and avoiding the
-      // url.fileURLToPath(import.meta.url) crash in Electron's renderer.
-      const pluginAbs = this.pluginAbsPath;
-
-      // Load WASM files from plugin dir and expose as Blob URLs.
-      // onnxruntime-web uses fetch() for WASM (browser mode), and Blob URLs are
-      // same-origin in Electron renderer so they load without CORS issues.
-      const wasmBlob = (name: string) => {
-        const p = nPath.join(pluginAbs, name);
-        if (!nFs.existsSync(p)) return undefined;
-        return URL.createObjectURL(new Blob([nFs.readFileSync(p)], { type: 'application/wasm' }));
-      };
-      const simdUrl = wasmBlob('ort-wasm-simd.wasm');
-      const baseUrl = wasmBlob('ort-wasm.wasm');
-      if (simdUrl || baseUrl) {
-        (env.backends.onnx.wasm as unknown as OnnxWasmConfig).wasmPaths = {
-          ...(simdUrl ? { 'ort-wasm-simd.wasm': simdUrl } : {}),
-          ...(baseUrl ? { 'ort-wasm.wasm':      baseUrl } : {}),
-        };
-      }
+      // Load WASM runtime from CDN — the browser caches it after the first
+      // download, so subsequent Obsidian boots are fast.
+      env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/';
       env.backends.onnx.wasm.numThreads = 1;
-
-      // Custom file cache: serves pre-shipped model files via real node:fs and
-      // caches any remote downloads for future offline use.
-      const isRemote = (s: string) => s.startsWith('http://') || s.startsWith('https://');
-      env.localModelPath  = this.modelsDir;
-      env.useCustomCache  = true;
-      env.customCache = {
-        async match(key: string) {
-          if (isRemote(key)) return undefined;
-          if (nFs.existsSync(key)) return new Response(nFs.readFileSync(key));
-          return undefined;
-        },
-        async put(key: string, response: Response) {
-          if (isRemote(key)) return;
-          try {
-            nFs.mkdirSync(nPath.dirname(key), { recursive: true });
-            nFs.writeFileSync(key, new Uint8Array(await response.arrayBuffer()));
-          } catch { /* ignore write errors */ }
-        },
-      };
-      env.allowLocalModels = true;
+      env.allowLocalModels = false;
 
       this.embedder = await pipeline(
         'feature-extraction',
@@ -279,7 +221,7 @@ export class IndexingService {
 
     const field = (mtimeField ?? '').trim() || 'updated';
     const fm    = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    const val   = fm?.[field];
+    const val: unknown = fm?.[field];
 
     if (val !== undefined && val !== null) {
       if (typeof val === 'number') return val;

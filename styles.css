@@ -1,6 +1,7 @@
 /* contentEl gets this class — it already fills the panel height */
+.workspace-leaf-content .ll-container,
 .ll-container {
-  display: flex !important;
+  display: flex;
   flex-direction: column;
   overflow: hidden;
   font-size: 0.9em;
@@ -473,11 +474,11 @@
 .ll-detected-format    { font-size: 0.75em; color: var(--text-muted); }
 
 /* Danger button (destructive confirm) */
-.ll-btn-danger {
+button.ll-btn-danger {
   padding: 5px 14px; border-radius: 5px; border: none; cursor: pointer;
-  background: #c62828 !important; color: #ffffff !important; font-size: 0.85em;
+  background: #c62828; color: #ffffff; font-size: 0.85em;
 }
-.ll-btn-danger:hover { background: #b71c1c !important; }
+button.ll-btn-danger:hover { background: #b71c1c; }
 
 /* ── Settings: progress bar ── */
 
@@ -1053,7 +1054,7 @@
 /* Settings field: Cancel/Confirm row */
 .ll-field-confirm-row { display: flex; gap: 8px; margin-top: 6px; }
 /* Wizard field: "good" feedback */
-.ll-field-ok        { color: var(--text-success, #22c55e) !important; }
+.ll-field-ok.ll-field-ok { color: var(--text-success, #22c55e); }
 .ll-wiz-warn-safe   { font-size: 0.85em; color: var(--text-success, #22c55e); margin: 0; }
 .ll-wiz-warn-mixed  { font-size: 0.85em; color: var(--text-warning, #eab308); margin: 0; }
 
