@@ -923,7 +923,7 @@ class LinkLinkView extends ItemView {
 
       const embedding = await this.plugin.indexingService.embed(text);
 
-      let index;
+      let index: IndexEntry[];
       try { index = await this.plugin.loadAnyIndex(); }
       catch { new Notice('No index found. Run Index Vault first.'); void this.refresh(); return; }
 
@@ -961,8 +961,7 @@ class LinkLinkView extends ItemView {
     const el = this.contentEl;
     el.empty(); el.addClass('ll-container');
 
-    const activeFile = this.app.workspace.getActiveFile();
-    const isGraph    = this.plugin.settings.viewMode === 'graph';
+    const isGraph = this.plugin.settings.viewMode === 'graph';
 
     // First header row (no interlink button in selection mode)
     const header = el.createEl('div', { cls: 'll-header' });
@@ -4199,8 +4198,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         setIcon(chevronEl, open ? 'chevron-down' : 'chevron-right');
       });
 
-      // 3. Enable toggle — settingsWrap is assigned right after, closure captures by reference
-      // eslint-disable-next-line prefer-const
+      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
       let settingsWrap: HTMLElement;
       new Setting(body)
         .setName('Enable')
@@ -4219,7 +4217,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
       new Setting(settingsWrap).setName('Search parameters').setHeading();
 
-      // eslint-disable-next-line prefer-const
+      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
       let ownParamsWrap: HTMLElement;
       new Setting(settingsWrap)
         .setName('Use Interlink search parameters')
