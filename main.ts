@@ -1678,18 +1678,6 @@ class SelectionTextPopup extends Modal {
 
     const btnRow = footer.createEl('div', { cls: 'll-sel-popup-btn-row' });
 
-    // Copy button
-    const copyBtn = btnRow.createEl('button', { text: 'Copy', cls: 'll-action-btn ll-action-btn-secondary' });
-    copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(this.state.text).then(() => {
-        copyBtn.setText('Copied ✓');
-        copyBtn.disabled = true;
-        copyBtn.setCssStyles({ opacity: '0.5' });
-      }).catch(() => {
-        copyBtn.setText('Failed');
-      });
-    });
-
     // Find button — navigates to the exact occurrence that was originally selected
     const findBtn = btnRow.createEl('button', { text: '🔍 Find', cls: 'll-action-btn ll-action-btn-accent' });
     findBtn.addEventListener('click', () => void (async () => {
