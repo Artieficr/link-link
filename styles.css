@@ -1060,3 +1060,146 @@ button.ll-btn-danger:hover { background: #b71c1c; }
 
 /* Progress wrap inside wizard */
 .ll-wiz-prog-wrap    { display: flex; flex-direction: column; gap: 4px; }
+
+/* ── "How it works" collapsible box (settings tab) ── */
+.ll-how-box {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.ll-how-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: var(--background-secondary);
+  user-select: none;
+}
+.ll-how-header:hover { background: var(--background-modifier-hover); }
+.ll-how-chevron { display: flex; align-items: center; color: var(--text-muted); flex-shrink: 0; }
+.ll-how-chevron svg { width: 14px; height: 14px; }
+.ll-how-title { font-weight: 600; font-size: 0.9em; }
+.ll-how-body {
+  display: none;
+  padding: 10px 14px 12px;
+  font-size: 0.87em;
+  line-height: 1.55;
+  color: var(--text-normal);
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+.ll-how-body-open { display: block; }
+.ll-how-editor-note { margin: 0 0 12px; font-style: italic; color: var(--text-muted); }
+.ll-how-list { margin: 0 0 14px 16px; padding: 0; }
+.ll-how-list li { margin: 4px 0; }
+.ll-how-desc { margin: 0 0 12px; }
+.ll-how-desc:last-child { margin-bottom: 0; }
+.ll-how-desc strong { color: var(--text-normal); }
+
+/* ── Selection icon button states ── */
+/* State 4: ring to show active selection mode */
+.ll-sel-icon-btn.ll-sel-icon-active {
+  box-shadow: 0 0 0 2px var(--text-on-accent);
+}
+/* State 2: pale when selection < 5 words */
+.ll-sel-icon-btn.ll-sel-icon-dim {
+  opacity: 0.4;
+}
+
+/* ── Selection Mode ── */
+
+/* Selection entry in list view */
+.ll-sel-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  margin-bottom: 4px;
+  cursor: pointer;
+  flex-wrap: wrap;
+  user-select: none;
+}
+.ll-sel-entry:hover { background: var(--background-modifier-hover); }
+.ll-sel-entry-icon { flex-shrink: 0; color: var(--interactive-accent); display: flex; align-items: center; }
+.ll-sel-entry-icon svg { width: 14px; height: 14px; }
+.ll-sel-entry-source {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: center;
+}
+.ll-sel-entry-preview {
+  font-size: 0.82em;
+  color: var(--text-normal);
+  line-height: 1.4;
+  flex: 1 1 100%;
+  padding-top: 2px;
+}
+.ll-sel-entry:not(.expanded) .ll-sel-entry-preview { display: none; }
+.ll-sel-entry-collapse {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ll-sel-entry-collapse svg { width: 12px; height: 12px; }
+
+/* Graph tooltip for selection center node */
+.ll-sel-graph-tip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+  font-size: 0.82em;
+  color: var(--text-normal);
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ll-sel-graph-tip-title { font-weight: 600; color: var(--bold-color, var(--text-normal)); }
+.ll-sel-graph-tip-body  { color: var(--text-muted); }
+
+/* Selection Text Popup */
+.ll-sel-popup .modal-content { display: flex; flex-direction: column; gap: 10px; max-width: 520px; }
+.ll-sel-popup-title-row { display: flex; align-items: center; justify-content: space-between; }
+.ll-sel-popup-title { font-weight: 600; font-size: 1em; }
+.ll-sel-popup-sep { height: 1px; background: var(--background-modifier-border); margin: 2px 0; }
+.ll-sel-popup-text {
+  font-size: 0.9em;
+  line-height: 1.55;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px 0;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.ll-sel-popup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ll-sel-popup-source { font-size: 0.85em; color: var(--text-muted); }
+.ll-sel-popup-source-link { color: var(--text-accent); cursor: pointer; text-decoration: none; }
+.ll-sel-popup-source-link:hover { text-decoration: underline; }
+.ll-sel-popup-btn-row { display: flex; gap: 6px; flex-shrink: 0; }
+

@@ -66,6 +66,7 @@ interface LinkLinkSettings {
   // Display
   viewMode: 'list' | 'graph';
   openMode: 'current' | 'new-tab' | 'split';
+  colorCenter: string;
   colorHigh: string;
   colorMid: string;
   colorLow: string;
@@ -77,6 +78,10 @@ interface LinkLinkSettings {
   textFadeThreshold: number;
   nodeSizeMultiplier: number;
   lineSizeMultiplier: number;
+  selectionModeEnabled: boolean;
+  selectionUseMainParams: boolean;
+  selectionTopN: number;
+  selectionThreshold: number;
 }
 
 const DEFAULT_SETTINGS: LinkLinkSettings = {
@@ -100,6 +105,7 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   relatedFieldName: '',
   viewMode: 'list',
   openMode: 'new-tab',
+  colorCenter: '#8b5cf6',
   colorHigh: '#22c55e',
   colorMid: '#eab308',
   colorLow: '#6b7280',
@@ -111,6 +117,10 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   textFadeThreshold: 0.6,
   nodeSizeMultiplier: 1,
   lineSizeMultiplier: 1,
+  selectionModeEnabled: true,
+  selectionUseMainParams: true,
+  selectionTopN: 15,
+  selectionThreshold: 0.5,
 };
 
 
@@ -124,6 +134,7 @@ interface GNode {
   linked: boolean;
   isOutgoing: boolean; // outgoing link: body-text wiki link from current note to this node
   isBacklink: boolean; // this node's file links to the current note
+  isSelectionNode?: boolean;
 }
 
 interface GEdge { a: number; b: number; }
@@ -220,6 +231,9 @@ class GraphSimulation {
   private onToggleRelated: (file: TFile) => Promise<void>;
   private isHoveringCenter = false;
   private accentColor: string;
+  private selectionNode: { text: string; onClickCenter: () => void } | null = null;
+  private selectionTooltipEl: HTMLElement | null = null;
+  private centerDragStart: { x: number; y: number } | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -231,7 +245,8 @@ class GraphSimulation {
     onOpen: (file: TFile) => void,
     onInsertLink: (file: TFile, dropTarget: Element | null, dropX: number, dropY: number) => void,
     onContextMenu: (file: TFile, event: MouseEvent) => void,
-    onToggleRelated: (file: TFile) => Promise<void>
+    onToggleRelated: (file: TFile) => Promise<void>,
+    selectionNode?: { text: string; onClickCenter: () => void }
   ) {
     this.canvas          = canvas;
     this.panelEl         = panelEl;
@@ -240,6 +255,7 @@ class GraphSimulation {
     this.onInsertLink    = onInsertLink;
     this.onContextMenu   = onContextMenu;
     this.onToggleRelated = onToggleRelated;
+    this.selectionNode   = selectionNode ?? null;
     this.dark        = activeDocument.body.classList.contains('theme-dark');
     this.accentColor = getComputedStyle(activeDocument.body).getPropertyValue('--interactive-accent').trim() || '#8b5cf6';
     this.ctx  = canvas.getContext('2d')!;
@@ -254,7 +270,8 @@ class GraphSimulation {
     this.nodes.push({
       file: currentFile, score: 1,
       x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0,
-      pinned: true, linked: false, isOutgoing: false, isBacklink: false
+      pinned: true, linked: false, isOutgoing: false, isBacklink: false,
+      isSelectionNode: !!selectionNode,
     });
     for (let i = 0; i < results.length; i++) {
       const isLinked = linkedPaths.has(results[i].file.path);
@@ -274,6 +291,7 @@ class GraphSimulation {
     canvas.addEventListener('pointermove',   (e) => this.handlePointerMove(e));
     canvas.addEventListener('pointerup',     (e) => this.handlePointerUp(e));
     canvas.addEventListener('pointercancel', (e) => this.resetDrag());
+    canvas.addEventListener('pointerleave',  () => { this.selectionTooltipEl?.remove(); this.selectionTooltipEl = null; });
     canvas.addEventListener('wheel',       (e) => this.handleWheel(e), { passive: false });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -327,6 +345,7 @@ class GraphSimulation {
     if (this.animFrame    !== null) { cancelAnimationFrame(this.animFrame);  this.animFrame    = null; }
     if (this.autoFitTimer !== null) { window.clearTimeout(this.autoFitTimer);       this.autoFitTimer = null; }
     this.ghostEl?.remove(); this.ghostEl = null;
+    this.selectionTooltipEl?.remove(); this.selectionTooltipEl = null;
   }
 
   toggleNodeLink(file: TFile, addLink: boolean) {
@@ -404,6 +423,18 @@ class GraphSimulation {
       return;
     }
 
+    // Detect click on selection center node
+    if (e.button === 0 && this.selectionNode) {
+      const c = this.nodes[0];
+      const cr = 11 * this.settings.nodeSizeMultiplier + 6;
+      if ((c.x - wx) ** 2 + (c.y - wy) ** 2 < cr * cr) {
+        e.preventDefault();
+        this.canvas.setPointerCapture(e.pointerId);
+        this.centerDragStart = { x: e.clientX, y: e.clientY };
+        return;
+      }
+    }
+
     e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
 
@@ -431,10 +462,31 @@ class GraphSimulation {
       return;
     }
 
-    if (!this.dragNode) {
+    if (!this.dragNode && !this.centerDragStart) {
       // Hover: update cursor when not dragging
       const rect = this.canvas.getBoundingClientRect();
       const [wx, wy] = this.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+      // Selection center node: show tooltip on hover
+      if (this.selectionNode) {
+        const c = this.nodes[0];
+        const cr = 11 * this.settings.nodeSizeMultiplier + 6;
+        const hoveringCenter = (c.x - wx) ** 2 + (c.y - wy) ** 2 < cr * cr;
+        if (hoveringCenter) {
+          if (!this.selectionTooltipEl) {
+            this.selectionTooltipEl = activeDocument.body.createEl('div', { cls: 'll-sel-graph-tip' });
+            this.selectionTooltipEl.createEl('strong', { text: 'Click to open Text Popup', cls: 'll-sel-graph-tip-title' });
+            this.selectionTooltipEl.createEl('span', { text: 'Shows the full selected text', cls: 'll-sel-graph-tip-body' });
+          }
+          this.selectionTooltipEl.setCssStyles({ left: e.clientX + 14 + 'px', top: e.clientY - 8 + 'px' });
+          this.canvas.setCssStyles({ cursor: 'pointer' });
+          return;
+        } else {
+          this.selectionTooltipEl?.remove();
+          this.selectionTooltipEl = null;
+        }
+      }
+
       this.canvas.setCssStyles({ cursor: this.nodeAt(wx, wy) ? 'grab' : 'default' });
       return;
     }
@@ -460,7 +512,7 @@ class GraphSimulation {
         this.ghostEl.setCssStyles({ top: e.clientY + 'px' });
       }
       this.isHoveringCenter = false;
-    } else {
+    } else if (this.dragNode) {
       const rect = this.canvas.getBoundingClientRect();
       const [wx, wy] = this.toWorld(e.clientX - rect.left, e.clientY - rect.top);
       this.dragNode.x = wx; this.dragNode.y = wy;
@@ -479,6 +531,12 @@ class GraphSimulation {
     if (this.isPanning) {
       this.isPanning = false;
       this.canvas.setCssStyles({ cursor: 'default' });
+      return;
+    }
+    if (this.centerDragStart) {
+      const moved = (e.clientX - this.centerDragStart.x) ** 2 + (e.clientY - this.centerDragStart.y) ** 2;
+      this.centerDragStart = null;
+      if (moved < 25 && this.selectionNode) this.selectionNode.onClickCenter();
       return;
     }
     if (!this.dragNode) return;
@@ -505,6 +563,7 @@ class GraphSimulation {
     this.isPanning = false;
     this.inGhostMode = false;
     this.isHoveringCenter = false;
+    this.centerDragStart = null;
     this.ghostEl?.remove(); this.ghostEl = null;
     this.canvas.setCssStyles({ cursor: 'default' });
   }
@@ -620,7 +679,9 @@ class GraphSimulation {
 
     for (const n of nodes) {
       const r    = (n.pinned ? 11 : 8) * settings.nodeSizeMultiplier;
-      const fill = n.pinned ? '#8b5cf6' : scoreToColor(n.score, settings, this.minScore, this.maxScore);
+      const fill = n.pinned
+        ? (n.isSelectionNode ? '#3b82f6' : settings.colorCenter)
+        : scoreToColor(n.score, settings, this.minScore, this.maxScore);
       if (n.pinned && this.isHoveringCenter) {
         ctx.beginPath(); ctx.arc(n.x, n.y, r + 6 / this.scale, 0, Math.PI * 2);
         ctx.strokeStyle = this.accentColor;
@@ -629,6 +690,19 @@ class GraphSimulation {
       }
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fillStyle = fill; ctx.fill();
+
+      // Draw Lucide "quote" icon inside selection center node
+      if (n.pinned && n.isSelectionNode) {
+        ctx.save();
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.clip();
+        const s = r / 20; // 0.6× of original r/12
+        ctx.translate(n.x - 11 * s, n.y - 12 * s);
+        ctx.scale(s, s);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fill(new Path2D('M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z'));
+        ctx.fill(new Path2D('M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z'));
+        ctx.restore();
+      }
 
       // Draw O/outgoing (vertical) / B/backlink (horizontal) marker lines inside node
       if (!n.pinned && (n.isOutgoing || n.isBacklink)) {
@@ -645,6 +719,7 @@ class GraphSimulation {
       }
 
       if (textAlpha <= 0) continue;
+      if (n.pinned && n.isSelectionNode) continue; // no filename label for selection node
       const name = n.file?.basename ?? '';
       if (!name) continue;
       const fs   = Math.max(7, Math.min(11, 9 / this.scale));
@@ -663,11 +738,23 @@ class GraphSimulation {
 
 // ─── View ────────────────────────────────────────────────────────────────────
 
+interface SelectionState {
+  text: string;
+  sourceFile: TFile;
+  sourceLine: number;
+  firstWord: string;
+  embedding: number[];
+  results: ResultEntry[];
+}
+
 class LinkLinkView extends ItemView {
   plugin: LinkLinkPlugin;
   private simulation: GraphSimulation | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private listUpdateFn: ((outgoingPaths: Set<string>, backlinkPaths: Set<string>) => void) | null = null;
+  private selectionState: SelectionState | null = null;
+  private selectionBtn: HTMLElement | null = null;
+  private selectionChangeHandler: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: LinkLinkPlugin) {
     super(leaf); this.plugin = plugin;
@@ -677,18 +764,244 @@ class LinkLinkView extends ItemView {
   getDisplayText() { return 'Link Link!'; }
   getIcon()        { return 'link'; }
 
-  async onOpen()  { await this.refresh(); }
+  async onOpen() {
+    this.selectionChangeHandler = () => this.updateSelectionBtn();
+    activeDocument.addEventListener('selectionchange', this.selectionChangeHandler);
+    await this.refresh();
+  }
 
   async onClose() {
+    if (this.selectionChangeHandler) {
+      activeDocument.removeEventListener('selectionchange', this.selectionChangeHandler);
+      this.selectionChangeHandler = null;
+    }
+    this.selectionState = null;
+    this.selectionBtn   = null;
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.simulation?.stop();          this.simulation = null;
     this.listUpdateFn = null;
   }
 
+  private mkIconBtn(
+    parent: HTMLElement,
+    icon: string,
+    tipTitle: string,
+    tipBody: string,
+    tipAlign: 'left' | 'right',
+    onClick: () => Promise<void>
+  ): HTMLElement {
+    const btn = parent.createEl('div', { cls: 'll-icon-btn' });
+    setIcon(btn, icon);
+    let hideTip: (() => void) | null = null;
+    btn.addEventListener('mouseenter', () => { hideTip = showListTip(btn, tipTitle, tipBody, tipAlign); });
+    btn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
+    btn.addEventListener('click', () => void (async () => {
+      hideTip?.(); hideTip = null;
+      btn.addClass('ll-icon-btn-busy');
+      try { await onClick(); } finally { btn.removeClass('ll-icon-btn-busy'); }
+    })());
+    return btn;
+  }
+
+  private updateSelectionBtn() {
+    const btn = this.selectionBtn;
+    if (!btn) return;
+    setIcon(btn, 'highlighter');
+    if (this.selectionState !== null) {
+      btn.addClass('ll-sel-icon-active');
+      btn.removeClass('ll-sel-icon-dim');
+    } else {
+      btn.removeClass('ll-sel-icon-active');
+      const { text, valid } = this.getEditorSelection();
+      btn.toggleClass('ll-sel-icon-dim', !!(text && !valid));
+    }
+  }
+
+  private getEditorSelection(): { text: string; valid: boolean; wordCount: number } {
+    const sel    = window.getSelection();
+    const text   = sel?.toString() ?? '';
+    const anchor = sel?.anchorNode;
+    const inEditor = !!(anchor && (anchor.nodeType === Node.TEXT_NODE
+      ? anchor.parentElement?.closest('.cm-editor')
+      : (anchor as Element).closest?.('.cm-editor')));
+    const wordCount = (inEditor && text)
+      ? text.trim().split(/\s+/).filter(w => w.length > 0).length
+      : 0;
+    return { text: inEditor ? text : '', valid: inEditor && wordCount >= 5, wordCount: inEditor ? wordCount : 0 };
+  }
+
+  private getSelectionBtnTip(): { title: string; body: string } {
+    if (this.selectionState !== null) {
+      return { title: 'Selection Mode', body: 'Searching by selected text. Deselect text and click to return to note view.' };
+    }
+    const { text, wordCount } = this.getEditorSelection();
+    if (!text) {
+      return { title: 'Selection Mode', body: 'Highlight 5 or more words in a note, then click to search by that passage.' };
+    }
+    if (wordCount < 5) {
+      return { title: 'Selection Mode', body: `${wordCount}/5 words selected — needs at least 5. Short passages don't produce reliable semantic search results.` };
+    }
+    return { title: 'Selection Mode', body: 'Click to search by selected text.' };
+  }
+
+  private createSelectionBtn(parent: HTMLElement): HTMLElement {
+    const btn = parent.createEl('div', { cls: 'll-icon-btn ll-sel-icon-btn' }); // ll-sel-icon-btn scoped for state classes
+    setIcon(btn, 'highlighter');
+    this.selectionBtn = btn;
+    let hideTip: (() => void) | null = null;
+    btn.addEventListener('mouseenter', () => {
+      hideTip?.();
+      const { title, body } = this.getSelectionBtnTip();
+      hideTip = showListTip(btn, title, body, 'right');
+    });
+    btn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
+    btn.addEventListener('click', () => { hideTip?.(); hideTip = null; void this.handleSelectionBtnClick(); });
+    return btn;
+  }
+
+  private async handleSelectionBtnClick() {
+    if (this.plugin.settings.embeddingSource === 'existing') {
+      new Notice('Selection search requires Built-in or Ollama embedding. Switch in Settings → Embedding.');
+      return;
+    }
+    const { text, valid, wordCount } = this.getEditorSelection();
+    if (valid) {
+      await this.activateSelectionMode(text);
+    } else if (this.selectionState !== null) {
+      this.deactivateSelectionMode();
+    } else if (text && wordCount > 0) {
+      new Notice(`Select at least 5 words to use Selection Mode (${wordCount} word${wordCount === 1 ? '' : 's'} selected).`);
+    } else {
+      new Notice('No text selected.');
+    }
+  }
+
+  private deactivateSelectionMode() {
+    this.selectionState = null;
+    void this.refresh();
+  }
+
+  private async activateSelectionMode(text: string) {
+    // Find the editor that owns the current DOM selection (activeEditor may be
+    // null because clicking the panel shifts focus away from the note).
+    const sel    = window.getSelection();
+    const anchor = sel?.anchorNode;
+    const cmEl   = anchor
+      ? (anchor.nodeType === Node.TEXT_NODE
+          ? anchor.parentElement?.closest('.cm-editor')
+          : (anchor as Element).closest?.('.cm-editor'))
+      : null;
+
+    let sourceFile: TFile | null = null;
+    let sourceLine = 0;
+    if (cmEl) {
+      for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+        const view = leaf.view as MarkdownView;
+        if (view.containerEl.contains(cmEl as Node)) {
+          sourceFile = view.file ?? null;
+          sourceLine = view.editor.getCursor('from').line;
+          break;
+        }
+      }
+    }
+    if (!sourceFile) { new Notice('No active note.'); return; }
+    const firstWord  = text.trim().split(/\s+/)[0] ?? '';
+
+    // Show loading state
+    this.simulation?.stop(); this.simulation = null;
+    this.resizeObserver?.disconnect(); this.resizeObserver = null;
+    this.listUpdateFn = null;
+    const el = this.contentEl;
+    el.empty(); el.addClass('ll-container');
+    const loadingEl = el.createEl('p', { text: 'Computing embedding…', cls: 'll-loading' });
+
+    const onProgress = (msg: string) => { loadingEl.setText(msg); };
+
+    try {
+      const ready = await this.plugin.indexingService.ensureModel((msg) => onProgress(msg));
+      if (!ready) { void this.refresh(); return; }
+
+      const embedding = await this.plugin.indexingService.embed(text);
+
+      let index;
+      try { index = await this.plugin.loadAnyIndex(); }
+      catch { new Notice('No index found. Run Index Vault first.'); void this.refresh(); return; }
+
+      const S = this.plugin.settings;
+      const threshold = S.selectionUseMainParams ? S.threshold : S.selectionThreshold;
+      const topN      = S.selectionUseMainParams ? S.topN      : S.selectionTopN;
+      const rawResults: { file: TFile; score: number }[] = [];
+      for (const entry of index) {
+        if (entry.path === sourceFile.path) continue; // exclude the note the text came from
+        const s = cosine(embedding, entry.embedding);
+        if (s < threshold) continue;
+        const tf = this.app.vault.getFileByPath(entry.path);
+        if (tf) rawResults.push({ file: tf, score: s });
+      }
+      rawResults.sort((a, b) => b.score - a.score);
+      const trimmed = topN > 0 ? rawResults.slice(0, topN) : rawResults;
+      const results: ResultEntry[] = trimmed.map(r => ({ ...r, isOutgoing: false, isBacklink: false }));
+
+      this.selectionState = { text, sourceFile, sourceLine, firstWord, embedding, results };
+      this.renderSelectionModePanel();
+    } catch (e) {
+      this.selectionState = null;
+      el.empty(); el.addClass('ll-container');
+      el.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
+    }
+  }
+
+  private renderSelectionModePanel() {
+    const state = this.selectionState!;
+    this.simulation?.stop(); this.simulation = null;
+    this.resizeObserver?.disconnect(); this.resizeObserver = null;
+    this.listUpdateFn = null;
+    this.selectionBtn = null;
+
+    const el = this.contentEl;
+    el.empty(); el.addClass('ll-container');
+
+    const activeFile = this.app.workspace.getActiveFile();
+    const isGraph    = this.plugin.settings.viewMode === 'graph';
+
+    // First header row (no interlink button in selection mode)
+    const header = el.createEl('div', { cls: 'll-header' });
+
+    header.createEl('span', { text: '[Selection mode]', cls: 'll-title' });
+    const controls = header.createEl('div', { cls: 'll-controls' });
+
+    // Selection button (state 4: accent color) — left of view toggle, no refresh button
+    this.createSelectionBtn(controls);
+    this.updateSelectionBtn(); // sets accent color since selectionState !== null
+
+    // View toggle (no refresh button in selection mode)
+    const toggle = controls.createEl('div', {
+      cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
+      title: isGraph ? 'Switch to list' : 'Switch to graph',
+    });
+    const knob = toggle.createEl('div', { cls: 'll-view-toggle-knob' });
+    setIcon(knob, isGraph ? 'network' : 'list');
+    toggle.addEventListener('click', () => void (async () => {
+      this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
+      await this.plugin.saveData(this.plugin.settings);
+      this.renderSelectionModePanel();
+    })());
+
+    if (state.results.length === 0) {
+      el.createEl('p', { text: 'No related notes above threshold.', cls: 'll-empty' });
+      return;
+    }
+    if (isGraph) this.renderGraph(el, state.sourceFile, state.results);
+    else         this.renderList(el, state.results, state.sourceFile);
+  }
+
   async refresh() {
+    if (this.selectionState !== null) return; // hold on selection results
+
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.simulation?.stop();          this.simulation = null;
     this.listUpdateFn = null;
+    this.selectionBtn = null;
 
     const el = this.contentEl;
     el.empty();
@@ -720,31 +1033,7 @@ class LinkLinkView extends ItemView {
         isBacklink: backlinkPaths.has(r.file.path),
       }));
 
-      const mkIconBtn = (
-        parent: HTMLElement,
-        icon: string,
-        tipTitle: string,
-        tipBody: string,
-        tipAlign: 'left' | 'right',
-        onClick: () => Promise<void>
-      ) => {
-        const btn = parent.createEl('div', { cls: 'll-icon-btn' });
-        setIcon(btn, icon);
-        // Fixed-position tooltip so button's hover opacity doesn't cascade into it
-        let hideTip: (() => void) | null = null;
-        btn.addEventListener('mouseenter', () => {
-          hideTip = showListTip(btn, tipTitle, tipBody, tipAlign);
-        });
-        btn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
-        btn.addEventListener('click', () => void (async () => {
-          hideTip?.(); hideTip = null;
-          btn.addClass('ll-icon-btn-busy');
-          try { await onClick(); } finally { btn.removeClass('ll-icon-btn-busy'); }
-        })());
-        return btn;
-      };
-
-      mkIconBtn(header, 'link', 'Interlink current note',
+      this.mkIconBtn(header, 'link', 'Interlink current note',
         'Update related links for this note only. Other notes stay untouched.',
         'left',
         async () => {
@@ -765,7 +1054,13 @@ class LinkLinkView extends ItemView {
       header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
       const controls = header.createEl('div', { cls: 'll-controls' });
 
-      mkIconBtn(controls, 'refresh-cw', 'Update panel',
+      // Selection mode button — left of refresh button
+      if (this.plugin.settings.selectionModeEnabled) {
+        this.createSelectionBtn(controls);
+        this.updateSelectionBtn();
+      }
+
+      this.mkIconBtn(controls, 'refresh-cw', 'Update panel',
         this.plugin.settings.embeddingSource === 'existing'
           ? 'Refresh the panel to pick up recent changes.'
           : 'Re-index this note and refresh the panel to pick up recent changes.',
@@ -850,6 +1145,11 @@ class LinkLinkView extends ItemView {
   private renderEmbeddingError(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile) {
     const header = el.createEl('div', { cls: 'll-header' });
     header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
+    if (this.plugin.settings.selectionModeEnabled) {
+      const controls = header.createEl('div', { cls: 'll-controls' });
+      this.createSelectionBtn(controls);
+      this.updateSelectionBtn();
+    }
 
     const body = el.createEl('div', { cls: 'll-emb-error' });
 
@@ -948,6 +1248,37 @@ class LinkLinkView extends ItemView {
     const minScore = scores.length > 0 ? Math.min(...scores) : 0;
     const maxScore = scores.length > 0 ? Math.max(...scores) : 1;
     const field = this.plugin.settings.relatedFieldName || 'related';
+
+    // Selection mode entry at top of list
+    if (this.selectionState !== null) {
+      const state    = this.selectionState;
+      const entry    = list.createEl('div', { cls: 'll-sel-entry expanded' });
+      let expanded   = true;
+      const iconEl   = entry.createEl('span', { cls: 'll-sel-entry-icon' });
+      setIcon(iconEl, 'highlighter');
+      entry.createEl('span', { text: state.sourceFile.basename, cls: 'll-sel-entry-source' });
+      const previewEl = entry.createEl('span', { cls: 'll-sel-entry-preview' });
+      const preview   = state.text.length > 120 ? state.text.slice(0, 120) + '…' : state.text;
+      previewEl.setText(preview);
+      let hideSelTip: (() => void) | null = null;
+      entry.addEventListener('mouseenter', () => { hideSelTip = showListTip(entry, 'Click to open Text Popup', 'Shows the full selected text'); });
+      entry.addEventListener('mouseleave', () => { hideSelTip?.(); hideSelTip = null; });
+      entry.addEventListener('click', () => {
+        hideSelTip?.(); hideSelTip = null;
+        if (!expanded) { expanded = true; entry.addClass('expanded'); previewEl.show(); return; }
+        new SelectionTextPopup(this.app, state).open();
+      });
+      const collapseBtn = entry.createEl('span', { cls: 'll-sel-entry-collapse', title: 'Collapse' });
+      setIcon(collapseBtn, 'chevron-up');
+      collapseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        expanded = false;
+        entry.removeClass('expanded');
+        previewEl.hide();
+        setIcon(collapseBtn, 'chevron-down');
+        collapseBtn.title = 'Expand';
+      });
+    }
 
     let dragGhost: HTMLElement | null = null;
     const itemUpdaters: Array<(outgoingPaths: Set<string>, backlinkPaths: Set<string>) => void> = [];
@@ -1136,6 +1467,10 @@ class LinkLinkView extends ItemView {
     const canvas = wrap.createEl('canvas', { cls: 'll-graph' });
     const linked = this.plugin.getLinkedPaths(currentFile, results);
 
+    const selInfo = this.selectionState
+      ? { text: this.selectionState.text, onClickCenter: () => new SelectionTextPopup(this.app, this.selectionState!).open() }
+      : undefined;
+
     this.simulation = new GraphSimulation(
       canvas, this.contentEl,
       currentFile, results, linked,
@@ -1178,7 +1513,8 @@ class LinkLinkView extends ItemView {
           this.simulation?.toggleNodeLink(f, true);
           new Notice(`Added "${f.basename}" to ${field}:`);
         }
-      }
+      },
+      selInfo
     );
     this.simulation.start();
 
@@ -1198,7 +1534,7 @@ class LinkLinkView extends ItemView {
     // Row 1: similarity color legend
     const colorRow = legend.createEl('div', { cls: 'll-legend-row' });
     for (const [color, label] of [
-      ['#8b5cf6', 'current'],
+      [settings.colorCenter, 'current'],
       [settings.colorHigh, `≥ ${(minS + (2 * span) / 3).toFixed(2)}`],
       [settings.colorMid,  `≥ ${(minS + span / 3).toFixed(2)}`],
       [settings.colorLow,  `< ${(minS + span / 3).toFixed(2)}`],
@@ -1304,6 +1640,111 @@ const INTERLINK_PHRASES = [
   'The web grows',
   'Every note deserves a neighbour',
 ];
+
+// ─── Selection Text Popup ─────────────────────────────────────────────────────
+
+class SelectionTextPopup extends Modal {
+  private state: SelectionState;
+
+  constructor(app: App, state: SelectionState) {
+    super(app);
+    this.state = state;
+  }
+
+  onOpen() {
+    this.renderMain();
+  }
+
+  private renderMain() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass('ll-sel-popup');
+
+    contentEl.createEl('div', { text: 'Selected text', cls: 'll-sel-popup-title' });
+    contentEl.createEl('div', { cls: 'll-sel-popup-sep' });
+
+    const textEl = contentEl.createEl('div', { cls: 'll-sel-popup-text' });
+    textEl.setText(this.state.text);
+
+    contentEl.createEl('div', { cls: 'll-sel-popup-sep' });
+    const footer = contentEl.createEl('div', { cls: 'll-sel-popup-footer' });
+    const sourceWrap = footer.createEl('span', { cls: 'll-sel-popup-source' });
+    sourceWrap.appendText('Source: ');
+    const sourceLink = sourceWrap.createEl('a', { text: this.state.sourceFile.basename, cls: 'll-sel-popup-source-link' });
+    sourceLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.close();
+      void this.app.workspace.openLinkText(this.state.sourceFile.path, '', false);
+    });
+
+    const btnRow = footer.createEl('div', { cls: 'll-sel-popup-btn-row' });
+
+    // Copy button
+    const copyBtn = btnRow.createEl('button', { text: 'Copy', cls: 'll-action-btn ll-action-btn-secondary' });
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(this.state.text).then(() => {
+        copyBtn.setText('Copied ✓');
+        copyBtn.disabled = true;
+        copyBtn.setCssStyles({ opacity: '0.5' });
+      }).catch(() => {
+        copyBtn.setText('Failed');
+      });
+    });
+
+    // Find button — navigates to the exact occurrence that was originally selected
+    const findBtn = btnRow.createEl('button', { text: '🔍 Find', cls: 'll-action-btn ll-action-btn-accent' });
+    findBtn.addEventListener('click', () => void (async () => {
+      const file = this.app.vault.getFileByPath(this.state.sourceFile.path);
+      if (!file) {
+        new Notice('Source note not found (may have been renamed or deleted).');
+        return;
+      }
+
+      // Open or activate the source note; get editor directly from the leaf
+      const mdLeaves = this.app.workspace.getLeavesOfType('markdown');
+      const existing = mdLeaves.find(l => (l.view as MarkdownView).file?.path === file.path);
+      let targetLeaf = existing ?? null;
+      if (existing) {
+        await this.app.workspace.revealLeaf(existing);
+      } else {
+        await this.app.workspace.openLinkText(file.path, '', true);
+        targetLeaf = this.app.workspace.getLeavesOfType('markdown')
+          .find(l => (l.view as MarkdownView).file?.path === file.path) ?? null;
+      }
+      if (!targetLeaf) return;
+      const editor = (targetLeaf.view as MarkdownView).editor;
+
+      // Find the occurrence closest to sourceLine — that's the one the user selected
+      const content = await this.app.vault.read(file);
+      let bestIdx      = -1;
+      let bestLineDiff = Infinity;
+      let searchFrom   = 0;
+      while (true) {
+        const idx = content.indexOf(this.state.text, searchFrom);
+        if (idx < 0) break;
+        const lineDiff = Math.abs(editor.offsetToPos(idx).line - this.state.sourceLine);
+        if (lineDiff < bestLineDiff) { bestLineDiff = lineDiff; bestIdx = idx; }
+        searchFrom = idx + 1;
+      }
+
+      if (bestIdx >= 0) {
+        const startPos = editor.offsetToPos(bestIdx);
+        const endPos   = editor.offsetToPos(bestIdx + this.state.text.length);
+        editor.setSelection(startPos, endPos);
+        editor.scrollIntoView({ from: startPos, to: endPos }, true);
+      } else {
+        // Text was edited away — fall back to the stored line
+        editor.setCursor({ line: this.state.sourceLine, ch: 0 });
+        editor.scrollIntoView({ from: { line: this.state.sourceLine, ch: 0 }, to: { line: this.state.sourceLine, ch: 0 } }, true);
+      }
+
+      this.close();
+      window.setTimeout(() => editor.focus(), 0);
+    })());
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
 
 class IndexProgressPopup {
   private el: HTMLElement;
@@ -2716,11 +3157,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
     const save = () => this.plugin.saveSettings();
     const app  = this.app;
 
-    // ── Tab bar: Embedding | Interlink Vault | Graph ─────────────────────
+    // ── Tab bar: Embedding | Interlink Vault | Graph | Selection Mode ────
     const tabBar = containerEl.createEl('div', { cls: 'll-tab-bar' });
     const body   = containerEl.createEl('div', { cls: 'll-tab-body' });
 
-    type TabId = 'embedding' | 'interlink' | 'graph';
+    type TabId = 'embedding' | 'interlink' | 'graph' | 'selection';
     let activeTab: TabId = 'embedding';
 
     const switchTab = (tab: TabId) => {
@@ -2731,13 +3172,15 @@ class LinkLinkSettingTab extends PluginSettingTab {
       );
       if (tab === 'embedding') renderEmbedding();
       else if (tab === 'interlink') renderInterlink();
-      else renderGraph();
+      else if (tab === 'graph') renderGraph();
+      else renderSelectionSettings();
     };
 
     for (const [id, label] of [
       ['embedding', 'Embedding'],
       ['interlink', 'Interlink Vault'],
       ['graph',     'Graph'],
+      ['selection', 'Selection Mode'],
     ] as const) {
       const btn = tabBar.createEl('button', {
         cls: 'll-tab' + (id === 'embedding' ? ' active' : ''),
@@ -3670,7 +4113,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           .onChange(v => { void (async () => { S.openMode = v as LinkLinkSettings['openMode']; await save(); })(); })
         );
 
-      const addColor = (name: string, desc: string, key: 'colorHigh' | 'colorMid' | 'colorLow') => {
+      const addColor = (name: string, desc: string, key: 'colorCenter' | 'colorHigh' | 'colorMid' | 'colorLow') => {
         const s = new Setting(body).setName(name).setDesc(desc);
         const inp = s.controlEl.createEl('input');
         inp.type  = 'color';
@@ -3679,6 +4122,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         inp.addEventListener('input', () => { void (async () => { S[key] = inp.value; await save(); })(); });
         addReset(s, key);
       };
+      addColor('Center node color', 'Represents the current note, or the selected passage in Selection Mode.', 'colorCenter');
       addColor('High similarity color', 'Top third of the score range above threshold.', 'colorHigh');
       addColor('Mid similarity color',  'Middle third.',                                  'colorMid');
       addColor('Low similarity color',  'Bottom third.',                                  'colorLow');
@@ -3708,7 +4152,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
           btn.onClick(() => void (async () => {
             const keys: (keyof LinkLinkSettings)[] = [
-              'viewMode', 'colorHigh', 'colorMid', 'colorLow', 'autoFit',
+              'viewMode', 'colorCenter', 'colorHigh', 'colorMid', 'colorLow', 'autoFit',
               'textFadeThreshold', 'nodeSizeMultiplier', 'lineSizeMultiplier',
               'centerStrength', 'repelStrength', 'linkStrength', 'linkDistance',
             ];
@@ -3719,6 +4163,83 @@ class LinkLinkSettingTab extends PluginSettingTab {
             renderGraph();
           })());
         });
+    };
+
+    // ── SELECTION MODE TAB ───────────────────────────────────────────────
+
+    const renderSelectionSettings = () => {
+      // 1. Heading
+      new Setting(body).setName('Selection Mode').setHeading();
+
+      // 2. How it works (collapsible spoiler)
+      const howBox    = body.createEl('div', { cls: 'll-how-box' });
+      const howHeader = howBox.createEl('div', { cls: 'll-how-header' });
+      const chevronEl = howHeader.createEl('span', { cls: 'll-how-chevron' });
+      setIcon(chevronEl, 'chevron-right');
+      howHeader.createEl('span', { text: 'How it works', cls: 'll-how-title' });
+
+      const howBody = howBox.createEl('div', { cls: 'll-how-body' });
+
+      howBody.createEl('p', { text: 'Only works in Editor mode.', cls: 'll-how-editor-note' });
+
+      const ul = howBody.createEl('ul', { cls: 'll-how-list' });
+      ul.createEl('li', { text: 'The selected text is embedded on the fly using your configured model.' });
+      ul.createEl('li', { text: 'Results use the same threshold and Top N settings by default, but can be configured to use different ones.' });
+
+      const addDesc = (label: string, desc: string) => {
+        const p = howBody.createEl('p', { cls: 'll-how-desc' });
+        p.createEl('strong', { text: label });
+        p.appendText(' ' + desc);
+      };
+      addDesc('Selection entry (list view):', 'A collapsible card at the top shows the source note and a preview of the selected text. Click it to open the Selection Text Popup.');
+      addDesc('Selection node (graph view):', 'Click the center node to open the Selection Text Popup.');
+      addDesc('Selection Text Popup:', 'Shows the full selected text (selectable, with a Copy button) and a Find button that opens the original passage.');
+      howHeader.addEventListener('click', () => {
+        const open = howBody.classList.toggle('ll-how-body-open');
+        setIcon(chevronEl, open ? 'chevron-down' : 'chevron-right');
+      });
+
+      // 3. Enable toggle — settingsWrap is assigned right after, closure captures by reference
+      // eslint-disable-next-line prefer-const
+      let settingsWrap: HTMLElement;
+      new Setting(body)
+        .setName('Enable')
+        .setDesc('Shows a highlighter button in the panel header. Only works in Obsidian Editor mode (source editing view — not reading mode). Highlight 5+ words, click to search by that passage; click again to return to note view.')
+        .addToggle(t => t.setValue(S.selectionModeEnabled).onChange(v => {
+          void (async () => {
+            S.selectionModeEnabled = v;
+            await save();
+            settingsWrap.setCssStyles({ display: v ? '' : 'none' });
+          })();
+        }));
+
+      // 4. Settings wrap (appended after Enable toggle)
+      settingsWrap = body.createEl('div');
+      settingsWrap.setCssStyles({ display: S.selectionModeEnabled ? '' : 'none' });
+
+      new Setting(settingsWrap).setName('Search parameters').setHeading();
+
+      // eslint-disable-next-line prefer-const
+      let ownParamsWrap: HTMLElement;
+      new Setting(settingsWrap)
+        .setName('Use Interlink search parameters')
+        .setDesc('When on, uses the same Top N and Similarity threshold as Interlink Vault. Turn off to set separate values.')
+        .addToggle(t => t.setValue(S.selectionUseMainParams).onChange(v => {
+          void (async () => {
+            S.selectionUseMainParams = v;
+            await save();
+            ownParamsWrap.setCssStyles({ display: v ? 'none' : '' });
+          })();
+        }));
+
+      ownParamsWrap = settingsWrap.createEl('div');
+      ownParamsWrap.setCssStyles({ display: S.selectionUseMainParams ? 'none' : '' });
+      slider(ownParamsWrap, 'Top N results',
+        'How many similar notes to show in the panel. Lower = more focused, higher = more connections, 0 = show all.',
+        'selectionTopN', 0, 100, 5);
+      slider(ownParamsWrap, 'Similarity threshold',
+        'How alike notes must be to count as related. 0 = any note qualifies, 1 = only near-identical notes. Around 0.5 is a good starting point.',
+        'selectionThreshold', 0, 1, 0.05);
     };
 
     switchTab('embedding');
