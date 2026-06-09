@@ -47,19 +47,18 @@ Same amount of notes on examples below. More semantic connections between relate
 
 ## Installation
 
-### Via BRAT
+### Community Plugins (recommended)
 
-1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from the Community Plugins browser
-2. Open BRAT settings → **Add Beta Plugin**
-3. Paste: `https://github.com/Artieficr/link-link`
-4. Enable **Link Link!** in Community Plugins
+1. Open Obsidian Settings → Community Plugins
+2. Click **Browse** and search for **Link Link**
+3. Click **Install**, then **Enable**
 
 ### Manual
 
-1. Download `main.js`, `manifest.json`, `styles.css`, `ort-wasm.wasm`, and `ort-wasm-simd.wasm` from the [latest release](https://github.com/Artieficr/link-link/releases/latest)
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/Artieficr/link-link/releases/latest)
 2. Copy them into your vault at `.obsidian/plugins/link-link/`
 3. Reload Obsidian
-4. Enable **Link Link!** in Settings → Community Plugins
+4. Enable **Link Link** in Settings → Community Plugins
 
 ## Quick Start
 
