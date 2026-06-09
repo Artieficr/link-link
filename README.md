@@ -40,7 +40,7 @@ Same amount of notes on examples below. More semantic connections between relate
 
 ## Requirements
 
-- Obsidian `1.4.0` or later
+- Obsidian `1.7.2` or later
 - Desktop only (Windows, macOS, Linux)
 - For the **Local model (Ollama) backend**: [Ollama](https://ollama.com/) installed, running, and the desired embedding model pulled (`ollama pull <model-name>`)
 - For the **Existing index backend**: an embeddings index file must be present in the vault directory. The plugin will attempt to read and normalize it. Full compatibility is not guaranteed.
