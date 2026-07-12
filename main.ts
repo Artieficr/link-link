@@ -140,6 +140,18 @@ interface GNode {
 interface GEdge { a: number; b: number; }
 type ResultEntry = { file: TFile; score: number; isOutgoing: boolean; isBacklink: boolean };
 
+// Warning badge drawn inside the graph's central node (e.g. no embedding for
+// this note). Hover shows `lines` in a popup; click runs `onActivate` if set
+// (null means informational only — nothing to do from the graph, e.g. the
+// note is excluded from indexing or an external index file is in use).
+interface CenterWarningInfo {
+  title: string;
+  lines: string[];
+  onActivate: (() => void) | null;
+}
+
+const WARNING_COLOR = '#f59e0b';
+
 class EmbeddingNotFoundError extends Error {
   constructor(
     public readonly fileName: string,
@@ -234,6 +246,7 @@ class GraphSimulation {
   private selectionNode: { text: string; onClickCenter: () => void } | null = null;
   private selectionTooltipEl: HTMLElement | null = null;
   private centerDragStart: { x: number; y: number } | null = null;
+  private centerWarning: CenterWarningInfo | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -246,7 +259,8 @@ class GraphSimulation {
     onInsertLink: (file: TFile, dropTarget: Element | null, dropX: number, dropY: number) => void,
     onContextMenu: (file: TFile, event: MouseEvent) => void,
     onToggleRelated: (file: TFile) => Promise<void>,
-    selectionNode?: { text: string; onClickCenter: () => void }
+    selectionNode?: { text: string; onClickCenter: () => void },
+    centerWarning?: CenterWarningInfo
   ) {
     this.canvas          = canvas;
     this.panelEl         = panelEl;
@@ -256,6 +270,7 @@ class GraphSimulation {
     this.onContextMenu   = onContextMenu;
     this.onToggleRelated = onToggleRelated;
     this.selectionNode   = selectionNode ?? null;
+    this.centerWarning   = centerWarning ?? null;
     this.dark        = activeDocument.body.classList.contains('theme-dark');
     this.accentColor = getComputedStyle(activeDocument.body).getPropertyValue('--interactive-accent').trim() || '#8b5cf6';
     this.ctx  = canvas.getContext('2d')!;
@@ -423,8 +438,8 @@ class GraphSimulation {
       return;
     }
 
-    // Detect click on selection center node
-    if (e.button === 0 && this.selectionNode) {
+    // Detect click on selection center node / center warning badge
+    if (e.button === 0 && (this.selectionNode || this.centerWarning?.onActivate)) {
       const c = this.nodes[0];
       const cr = 11 * this.settings.nodeSizeMultiplier + 6;
       if ((c.x - wx) ** 2 + (c.y - wy) ** 2 < cr * cr) {
@@ -467,19 +482,26 @@ class GraphSimulation {
       const rect = this.canvas.getBoundingClientRect();
       const [wx, wy] = this.toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
-      // Selection center node: show tooltip on hover
-      if (this.selectionNode) {
+      // Selection center node / center warning badge: show tooltip on hover
+      if (this.selectionNode || this.centerWarning) {
         const c = this.nodes[0];
         const cr = 11 * this.settings.nodeSizeMultiplier + 6;
         const hoveringCenter = (c.x - wx) ** 2 + (c.y - wy) ** 2 < cr * cr;
         if (hoveringCenter) {
           if (!this.selectionTooltipEl) {
             this.selectionTooltipEl = activeDocument.body.createEl('div', { cls: 'll-sel-graph-tip' });
-            this.selectionTooltipEl.createEl('strong', { text: 'Click to open Text Popup', cls: 'll-sel-graph-tip-title' });
-            this.selectionTooltipEl.createEl('span', { text: 'Shows the full selected text', cls: 'll-sel-graph-tip-body' });
+            if (this.selectionNode) {
+              this.selectionTooltipEl.createEl('strong', { text: 'Click to open Text Popup', cls: 'll-sel-graph-tip-title' });
+              this.selectionTooltipEl.createEl('span', { text: 'Shows the full selected text', cls: 'll-sel-graph-tip-body' });
+            } else if (this.centerWarning) {
+              this.selectionTooltipEl.createEl('strong', { text: this.centerWarning.title, cls: 'll-sel-graph-tip-title' });
+              for (const line of this.centerWarning.lines) {
+                this.selectionTooltipEl.createEl('span', { text: line, cls: 'll-sel-graph-tip-body' });
+              }
+            }
           }
           this.selectionTooltipEl.setCssStyles({ left: e.clientX + 14 + 'px', top: e.clientY - 8 + 'px' });
-          this.canvas.setCssStyles({ cursor: 'pointer' });
+          this.canvas.setCssStyles({ cursor: (this.selectionNode || this.centerWarning?.onActivate) ? 'pointer' : 'default' });
           return;
         } else {
           this.selectionTooltipEl?.remove();
@@ -536,7 +558,10 @@ class GraphSimulation {
     if (this.centerDragStart) {
       const moved = (e.clientX - this.centerDragStart.x) ** 2 + (e.clientY - this.centerDragStart.y) ** 2;
       this.centerDragStart = null;
-      if (moved < 25 && this.selectionNode) this.selectionNode.onClickCenter();
+      if (moved < 25) {
+        if (this.selectionNode) this.selectionNode.onClickCenter();
+        else this.centerWarning?.onActivate?.();
+      }
       return;
     }
     if (!this.dragNode) return;
@@ -680,7 +705,7 @@ class GraphSimulation {
     for (const n of nodes) {
       const r    = (n.pinned ? 11 : 8) * settings.nodeSizeMultiplier;
       const fill = n.pinned
-        ? (n.isSelectionNode ? '#3b82f6' : settings.colorCenter)
+        ? (n.isSelectionNode ? '#3b82f6' : this.centerWarning ? WARNING_COLOR : settings.colorCenter)
         : scoreToColor(n.score, settings, this.minScore, this.maxScore);
       if (n.pinned && this.isHoveringCenter) {
         ctx.beginPath(); ctx.arc(n.x, n.y, r + 6 / this.scale, 0, Math.PI * 2);
@@ -690,6 +715,22 @@ class GraphSimulation {
       }
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fillStyle = fill; ctx.fill();
+
+      // Draw a warning triangle + exclamation mark inside the center node
+      if (n.pinned && this.centerWarning) {
+        const s = r * 0.62;
+        ctx.beginPath();
+        ctx.moveTo(n.x, n.y - s);
+        ctx.lineTo(n.x - s * 0.87, n.y + s * 0.65);
+        ctx.lineTo(n.x + s * 0.87, n.y + s * 0.65);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.fill();
+        ctx.fillStyle = WARNING_COLOR;
+        const barW = Math.max(1, r * 0.11);
+        ctx.fillRect(n.x - barW / 2, n.y - s * 0.30, barW, s * 0.55);
+        ctx.beginPath(); ctx.arc(n.x, n.y + s * 0.48, barW * 0.8, 0, Math.PI * 2); ctx.fill();
+      }
 
       // Draw Lucide "quote" icon inside selection center node
       if (n.pinned && n.isSelectionNode) {
@@ -1102,10 +1143,86 @@ class LinkLinkView extends ItemView {
     } catch (e) {
       el.empty(); el.addClass('ll-container');
       if (e instanceof EmbeddingNotFoundError) {
-        this.renderEmbeddingError(el, e, activeFile);
+        this.renderMissingEmbeddingPanel(el, e, activeFile);
       } else {
         el.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
       }
+    }
+  }
+
+  // Missing/excluded embedding no longer blocks the graph or list — the current
+  // note can still have backlinks/outgoing/related-field connections worth
+  // seeing. This panel keeps the view toggle so the user isn't stuck on
+  // whichever mode was last active; the "no embedding" reason and, where
+  // actionable, the indexing action move into the graph's warning badge, or
+  // stay as the inline banner above the list in list mode.
+  private renderMissingEmbeddingPanel(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile) {
+    const header = el.createEl('div', { cls: 'll-header' });
+    header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
+    const controls = header.createEl('div', { cls: 'll-controls' });
+    if (this.plugin.settings.selectionModeEnabled) {
+      this.createSelectionBtn(controls);
+      this.updateSelectionBtn();
+    }
+
+    const isGraph = this.plugin.settings.viewMode === 'graph';
+    const toggle  = controls.createEl('div', {
+      cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
+      title: isGraph ? 'Switch to list' : 'Switch to graph',
+    });
+    const knob = toggle.createEl('div', { cls: 'll-view-toggle-knob' });
+    setIcon(knob, isGraph ? 'network' : 'list');
+    toggle.addEventListener('click', () => void (async () => {
+      this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
+      await this.plugin.saveData(this.plugin.settings);
+      await this.refresh();
+    })());
+
+    const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(activeFile);
+    const results: ResultEntry[] = [...new Set([...outgoingPaths, ...backlinkPaths])]
+      .map(p => this.app.vault.getFileByPath(p))
+      .filter((f): f is TFile => f !== null && f.extension === 'md')
+      .map(f => ({ file: f, score: 0, isOutgoing: outgoingPaths.has(f.path), isBacklink: backlinkPaths.has(f.path) }));
+
+    const indexableFiles = this.plugin.indexingService.getFilesToIndex();
+    const isExcluded = !indexableFiles.some(f => f.path === activeFile.path);
+
+    if (isGraph) {
+      this.renderGraph(el, activeFile, results, this.buildCenterWarning(err, isExcluded, activeFile));
+    } else {
+      this.renderEmbeddingErrorBody(el, err, activeFile, isExcluded);
+      if (results.length > 0) this.renderList(el, results, activeFile);
+    }
+  }
+
+  private buildCenterWarning(err: EmbeddingNotFoundError, isExcluded: boolean, activeFile: TFile): CenterWarningInfo {
+    const title = `No embedding for "${err.fileName}"`;
+    if (err.source === 'existing') {
+      return { title, lines: ['Make sure an index file is selected in Settings → Embedding.'], onActivate: null };
+    }
+    if (isExcluded) {
+      return {
+        title,
+        lines: ['It is excluded from indexing.', 'To index this note, remove it from the exclusion list in the Indexing target settings.'],
+        onActivate: null,
+      };
+    }
+    return {
+      title,
+      lines: ['Click to index the active note.'],
+      onActivate: () => void this.triggerIndexActiveNote(activeFile),
+    };
+  }
+
+  private async triggerIndexActiveNote(activeFile: TFile) {
+    const { onProgress, onDone, onError } = this.plugin.createProgressDisplay();
+    try {
+      const { added, updated } = await this.plugin.indexingService.index(onProgress, [activeFile]);
+      onDone(added + updated === 0 ? 'Already up to date.' : `Indexed "${activeFile.basename}".`);
+      void this.refresh();
+    } catch (e) {
+      onError();
+      new Notice(`Indexing failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1141,19 +1258,8 @@ class LinkLinkView extends ItemView {
     }
   }
 
-  private renderEmbeddingError(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile) {
-    const header = el.createEl('div', { cls: 'll-header' });
-    header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
-    if (this.plugin.settings.selectionModeEnabled) {
-      const controls = header.createEl('div', { cls: 'll-controls' });
-      this.createSelectionBtn(controls);
-      this.updateSelectionBtn();
-    }
-
+  private renderEmbeddingErrorBody(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile, isExcluded: boolean) {
     const body = el.createEl('div', { cls: 'll-emb-error' });
-
-    const indexableFiles = this.plugin.indexingService.getFilesToIndex();
-    const isExcluded = !indexableFiles.some(f => f.path === activeFile.path);
 
     const msgText = isExcluded
       ? `No embedding for "${err.fileName}", it is excluded from indexing.`
@@ -1171,8 +1277,9 @@ class LinkLinkView extends ItemView {
         cls: 'll-error-hint'
       });
     } else {
+      body.createEl('p', { text: 'Click to index the active note.', cls: 'll-error-hint' });
       const btnRow = body.createEl('div', { cls: 'll-reindex-row' });
-      const btn = btnRow.createEl('button', { text: 'Index', cls: 'll-action-btn ll-action-btn-accent' });
+      const btn = btnRow.createEl('button', { text: 'Index note', cls: 'll-action-btn ll-action-btn-accent' });
       const progressWrap = body.createEl('div', { cls: 'll-progress-wrap' });
       progressWrap.setCssStyles({ display: 'none' });
       const progLabel = body.createEl('p', { cls: 'll-prog-label' });
@@ -1181,61 +1288,28 @@ class LinkLinkView extends ItemView {
 
       btn.addEventListener('click', () => void (async () => {
         btn.disabled = true;
-        let confirmMsg: string;
+        btn.setText('Indexing…');
+        progressWrap.setCssStyles({ display: 'block' });
+        progLabel.setCssStyles({ display: 'block' });
         try {
-          const preview = await this.plugin.indexingService.previewChanges();
-          if (preview === null) {
-            const count = this.plugin.indexingService.getFilesToIndex().length;
-            confirmMsg = `${count} notes will be indexed for the first time. This may take several minutes.`;
-          } else {
-            const { toEmbed, unchanged, toRemove } = preview;
-            const parts: string[] = [];
-            if (toEmbed   > 0) parts.push(`${toEmbed} to index`);
-            if (unchanged > 0) parts.push(`${unchanged} unchanged`);
-            if (toRemove  > 0) parts.push(`${toRemove} entries to remove`);
-            confirmMsg = parts.length > 0 ? parts.join(' · ') : 'Index is already up to date.';
-          }
-        } catch {
-          confirmMsg = `Depending on your vault size, indexing may take several minutes.`;
+          const { added, updated } = await this.plugin.indexingService.index(
+            (msg, pct) => {
+              progLabel.setText(msg);
+              bar.setCssStyles({ width: pct + '%' });
+              bar.classList.toggle('indeterminate', pct === 0);
+            },
+            [activeFile]
+          );
+          progLabel.setText(added + updated === 0 ? 'Already up to date.' : `Indexed "${activeFile.basename}".`);
+          bar.setCssStyles({ width: '100%' });
+          window.setTimeout(() => void this.refresh(), 1200);
+        } catch (e) {
+          progLabel.setText(`Error: ${e instanceof Error ? e.message : String(e)}`);
+          window.setTimeout(() => void this.refresh(), 4000);
         } finally {
           btn.disabled = false;
+          btn.setText('Index note');
         }
-
-        new ConfirmModal(
-          this.app,
-          'Index vault?',
-          confirmMsg,
-          async () => {
-            btn.disabled = true;
-            btn.setText('Indexing…');
-            progressWrap.setCssStyles({ display: 'block' });
-            progLabel.setCssStyles({ display: 'block' });
-            const { onProgress, onDone, onError } = this.plugin.createProgressDisplay(
-              (msg, pct) => {
-                progLabel.setText(msg);
-                bar.setCssStyles({ width: pct + '%' });
-                bar.classList.toggle('indeterminate', pct === 0);
-              }
-            );
-            try {
-              const { added, updated, removed } = await this.plugin.indexingService.index(onProgress);
-              const summary = added + updated === 0
-                ? 'Index is up to date.'
-                : `+${added} new, ${updated} updated, ${removed} removed`;
-              onDone(summary);
-              progLabel.setText('Indexing complete!');
-              bar.setCssStyles({ width: '100%' });
-              window.setTimeout(() => void this.refresh(), 1500);
-            } catch (e) {
-              onError();
-              progLabel.setText(`Error: ${e instanceof Error ? e.message : String(e)}`);
-              window.setTimeout(() => void this.refresh(), 4000);
-            } finally {
-              btn.disabled = false;
-              btn.setText('Index');
-            }
-          }
-        ).open();
       })());
     }
   }
@@ -1461,7 +1535,7 @@ class LinkLinkView extends ItemView {
     };
   }
 
-  private renderGraph(el: HTMLElement, currentFile: TFile, results: ResultEntry[]) {
+  private renderGraph(el: HTMLElement, currentFile: TFile, results: ResultEntry[], centerWarning?: CenterWarningInfo) {
     const wrap   = el.createEl('div', { cls: 'll-graph-wrap' });
     const canvas = wrap.createEl('canvas', { cls: 'll-graph' });
     const linked = this.plugin.getLinkedPaths(currentFile, results);
@@ -1513,7 +1587,8 @@ class LinkLinkView extends ItemView {
           new Notice(`Added "${f.basename}" to ${field}:`);
         }
       },
-      selInfo
+      selInfo,
+      centerWarning
     );
     this.simulation.start();
 
@@ -2171,10 +2246,9 @@ export default class LinkLinkPlugin extends Plugin {
     return [...semantic.slice(0, topN), ...natural].sort((a, b) => b.score - a.score);
   }
 
-  // Returns naturally-connected files NOT already in `existing` (body-text outgoing links +
-  // backlinks), with their cosine score. Frontmatter-only links (e.g. the related: field) are
-  // intentionally excluded so they remain subject to threshold filtering — otherwise interlink's
-  // own output would force notes below threshold to always appear in the panel.
+  // Returns naturally-connected files NOT already in `existing` (body-text outgoing links,
+  // related: frontmatter links, and backlinks), with their cosine score. These always show
+  // regardless of the similarity threshold — they're connections the user explicitly made.
   async getLinkedResults(
     currentFile: TFile,
     existing: { file: TFile; score: number }[]
@@ -2182,12 +2256,14 @@ export default class LinkLinkPlugin extends Plugin {
     const resolved = this.app.metadataCache.resolvedLinks;
     const linkedPaths = new Set<string>();
 
-    // Body-text outgoing links only (excludes frontmatter wiki-links such as related:)
+    // Body-text outgoing links
     const bodyLinks = this.app.metadataCache.getFileCache(currentFile)?.links ?? [];
     for (const link of bodyLinks) {
       const dest = this.app.metadataCache.getFirstLinkpathDest(link.link, currentFile.path);
       if (dest) linkedPaths.add(dest.path);
     }
+    // related: frontmatter field outgoing links
+    for (const p of this.getRelatedFieldOutgoingPaths(currentFile)) linkedPaths.add(p);
     // Backlinks — any note that links to the current note
     for (const [src, links] of Object.entries(resolved)) {
       if (src !== currentFile.path && links[currentFile.path]) linkedPaths.add(src);
@@ -2219,10 +2295,28 @@ export default class LinkLinkPlugin extends Plugin {
     const linked = new Set<string>();
     const resolved = this.app.metadataCache.resolvedLinks;
     for (const path of Object.keys(resolved[currentFile.path] ?? {})) linked.add(path);
+    for (const p of this.getRelatedFieldOutgoingPaths(currentFile)) linked.add(p);
     for (const { file } of results) {
       if (resolved[file.path]?.[currentFile.path]) linked.add(file.path);
     }
     return linked;
+  }
+
+  // Wiki-links found in the configured related: frontmatter field, resolved to
+  // destination paths. Treated as outgoing connections everywhere body-text
+  // outgoing links are (graph edge, O badge, always shown regardless of
+  // similarity threshold) — a manually- or interlink-added related: link is a
+  // deliberate connection the user made, same as writing [[link]] in the body.
+  private getRelatedFieldOutgoingPaths(file: TFile): Set<string> {
+    const field = this.settings.relatedFieldName || 'related';
+    const frontmatterLinks = this.app.metadataCache.getFileCache(file)?.frontmatterLinks ?? [];
+    const paths = new Set<string>();
+    for (const fl of frontmatterLinks) {
+      if (fl.key !== field && !fl.key.startsWith(field + '.')) continue;
+      const dest = this.app.metadataCache.getFirstLinkpathDest(fl.link, file.path);
+      if (dest) paths.add(dest.path);
+    }
+    return paths;
   }
 
   getOutgoingAndBacklinkPaths(currentFile: TFile): { outgoingPaths: Set<string>; backlinkPaths: Set<string> } {
@@ -2234,6 +2328,7 @@ export default class LinkLinkPlugin extends Plugin {
       const dest = this.app.metadataCache.getFirstLinkpathDest(link.link, currentFile.path);
       if (dest) outgoingPaths.add(dest.path);
     }
+    for (const p of this.getRelatedFieldOutgoingPaths(currentFile)) outgoingPaths.add(p);
 
     const backlinkPaths = new Set<string>();
     for (const [src, links] of Object.entries(resolved)) {
