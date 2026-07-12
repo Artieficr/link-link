@@ -35,7 +35,7 @@ export class ConfirmModal extends Modal {
     const { contentEl } = this;
     contentEl.createEl('h3', { text: this.message });
     contentEl.createEl('p',  { text: this.detail, cls: 'll-modal-detail' });
-    const row = contentEl.createEl('div', { cls: 'll-modal-btns' });
+    const row = contentEl.createDiv({ cls: 'll-modal-btns' });
     row.createEl('button', { text: this.cancelText }).addEventListener('click', () => this.close());
     const ok = row.createEl('button', {
       text: this.confirmText,

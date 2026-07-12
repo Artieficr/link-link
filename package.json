@@ -13,6 +13,8 @@
   "devDependencies": {
     "@types/node": "25.9.1",
     "esbuild": "^0.28.0",
+    "eslint": "^10.7.0",
+    "eslint-plugin-obsidianmd": "^0.4.1",
     "obsidian": "1.13.0",
     "typescript": "6.0.3"
   },

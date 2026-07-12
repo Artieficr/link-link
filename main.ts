@@ -196,9 +196,9 @@ function scoreToColor(score: number, s: LinkLinkSettings, minScore = 0, maxScore
 // Fixed-position tooltip for list items (avoids overflow-y:auto clipping).
 // Returns a cleanup function; caller must call it on mouseleave.
 function showListTip(anchor: HTMLElement, title: string, body: string, align: 'left' | 'right' = 'left'): () => void {
-  const tip = activeDocument.body.createEl('div', { cls: 'll-list-tip' });
+  const tip = activeDocument.body.createDiv({ cls: 'll-list-tip' });
   tip.createEl('strong', { text: title, cls: 'll-list-tip-title' });
-  tip.createEl('span',   { text: body,  cls: 'll-list-tip-body' });
+  tip.createSpan({ text: body,  cls: 'll-list-tip-body' });
   const r = anchor.getBoundingClientRect();
   tip.setCssStyles({ top: (r.bottom + 4) + 'px' });
   if (align === 'right') tip.setCssStyles({ right: (window.innerWidth - r.right) + 'px' });
@@ -229,7 +229,7 @@ function getIconPrimitives(name: string): IconPrimitive[] {
   const cached = iconPrimitiveCache.get(name);
   if (cached) return cached;
 
-  const tempEl = document.createElement('div');
+  const tempEl = createDiv();
   setIcon(tempEl, name);
   const svg = tempEl.querySelector('svg');
   const primitives: IconPrimitive[] = [];
@@ -497,7 +497,7 @@ class GraphSimulation {
 
     if (e.button === 2 && node?.file) {
       e.preventDefault();
-      this.onContextMenu(node.file, e as unknown as MouseEvent);
+      this.onContextMenu(node.file, e);
       return;
     }
 
@@ -552,14 +552,14 @@ class GraphSimulation {
         const hoveringCenter = (c.x - wx) ** 2 + (c.y - wy) ** 2 < cr * cr;
         if (hoveringCenter) {
           if (!this.selectionTooltipEl) {
-            this.selectionTooltipEl = activeDocument.body.createEl('div', { cls: 'll-sel-graph-tip' });
+            this.selectionTooltipEl = activeDocument.body.createDiv({ cls: 'll-sel-graph-tip' });
             if (this.selectionNode) {
               this.selectionTooltipEl.createEl('strong', { text: 'Click to open Text Popup', cls: 'll-sel-graph-tip-title' });
-              this.selectionTooltipEl.createEl('span', { text: 'Shows the full selected text', cls: 'll-sel-graph-tip-body' });
+              this.selectionTooltipEl.createSpan({ text: 'Shows the full selected text', cls: 'll-sel-graph-tip-body' });
             } else if (this.centerWarning) {
               this.selectionTooltipEl.createEl('strong', { text: this.centerWarning.title, cls: 'll-sel-graph-tip-title' });
               for (const line of this.centerWarning.lines) {
-                this.selectionTooltipEl.createEl('span', { text: line, cls: 'll-sel-graph-tip-body' });
+                this.selectionTooltipEl.createSpan({ text: line, cls: 'll-sel-graph-tip-body' });
               }
             }
           }
@@ -583,7 +583,7 @@ class GraphSimulation {
     if (outside && !this.inGhostMode) {
       this.inGhostMode = true;
       if (this.dragFile) {
-        this.ghostEl = activeDocument.body.createEl('div', { cls: 'll-drag-ghost' });
+        this.ghostEl = activeDocument.body.createDiv({ cls: 'll-drag-ghost' });
         this.ghostEl.setText(`[[${this.dragFile.basename}]]`);
       }
     } else if (!outside && this.inGhostMode) {
@@ -932,7 +932,7 @@ class LinkLinkView extends ItemView {
     tipAlign: 'left' | 'right',
     onClick: () => Promise<void>
   ): HTMLElement {
-    const btn = parent.createEl('div', { cls: 'll-icon-btn' });
+    const btn = parent.createDiv({ cls: 'll-icon-btn' });
     setIcon(btn, icon);
     let hideTip: (() => void) | null = null;
     btn.addEventListener('mouseenter', () => { hideTip = showListTip(btn, tipTitle, tipBody, tipAlign); });
@@ -987,7 +987,7 @@ class LinkLinkView extends ItemView {
   }
 
   private createSelectionBtn(parent: HTMLElement): HTMLElement {
-    const btn = parent.createEl('div', { cls: 'll-icon-btn ll-sel-icon-btn' }); // ll-sel-icon-btn scoped for state classes
+    const btn = parent.createDiv({ cls: 'll-icon-btn ll-sel-icon-btn' }); // ll-sel-icon-btn scoped for state classes
     setIcon(btn, 'highlighter');
     this.selectionBtn = btn;
     let hideTip: (() => void) | null = null;
@@ -1044,7 +1044,7 @@ class LinkLinkView extends ItemView {
     if (!cmEl) return null;
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view as MarkdownView;
-      if (view.containerEl.contains(cmEl as Node) && view.file) {
+      if (view.containerEl.contains(cmEl) && view.file) {
         return { file: view.file, editor: view.editor };
       }
     }
@@ -1171,7 +1171,7 @@ class LinkLinkView extends ItemView {
   }
 
   private createLiveModeBtn(parent: HTMLElement): HTMLElement {
-    const btn = parent.createEl('div', { cls: 'll-icon-btn ll-sel-icon-btn' });
+    const btn = parent.createDiv({ cls: 'll-icon-btn ll-sel-icon-btn' });
     this.liveModeBtn = btn;
     this.updateLiveModeBtn();
     let hideTip: (() => void) | null = null;
@@ -1222,9 +1222,9 @@ class LinkLinkView extends ItemView {
     const el = this.contentEl;
     el.empty(); el.addClass('ll-container');
 
-    const header = el.createEl('div', { cls: 'll-header' });
-    header.createEl('span', { text: '[Live mode]', cls: 'll-title' });
-    const controls = header.createEl('div', { cls: 'll-controls' });
+    const header = el.createDiv({ cls: 'll-header' });
+    header.createSpan({ text: '[Live mode]', cls: 'll-title' });
+    const controls = header.createDiv({ cls: 'll-controls' });
     if (this.plugin.settings.selectionModeEnabled) {
       this.createSelectionBtn(controls);
       this.updateSelectionBtn();
@@ -1289,10 +1289,10 @@ class LinkLinkView extends ItemView {
     const isGraph = this.plugin.settings.viewMode === 'graph';
 
     // First header row (no interlink button in selection/live mode)
-    const header = el.createEl('div', { cls: 'll-header' });
+    const header = el.createDiv({ cls: 'll-header' });
 
-    header.createEl('span', { text: state.origin === 'live' ? '[Live mode]' : '[Selection mode]', cls: 'll-title' });
-    const controls = header.createEl('div', { cls: 'll-controls' });
+    header.createSpan({ text: state.origin === 'live' ? '[Live mode]' : '[Selection mode]', cls: 'll-title' });
+    const controls = header.createDiv({ cls: 'll-controls' });
 
     // Mode buttons (active one shown in accent color) — left of view toggle, no refresh button
     if (this.plugin.settings.selectionModeEnabled) {
@@ -1304,11 +1304,11 @@ class LinkLinkView extends ItemView {
     }
 
     // View toggle (no refresh button in selection/live mode)
-    const toggle = controls.createEl('div', {
+    const toggle = controls.createDiv({
       cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
       title: isGraph ? 'Switch to list' : 'Switch to graph',
     });
-    const knob = toggle.createEl('div', { cls: 'll-view-toggle-knob' });
+    const knob = toggle.createDiv({ cls: 'll-view-toggle-knob' });
     setIcon(knob, isGraph ? 'network' : 'list');
     toggle.addEventListener('click', () => void (async () => {
       this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
@@ -1354,7 +1354,7 @@ class LinkLinkView extends ItemView {
       const baseResults = await this.plugin.getRelated(activeFile, naturalPaths);
       el.empty(); el.addClass('ll-container');
 
-      const header  = el.createEl('div', { cls: 'll-header' });
+      const header  = el.createDiv({ cls: 'll-header' });
       const isGraph = this.plugin.settings.viewMode === 'graph';
 
       // Always show linked notes regardless of Top N / threshold
@@ -1384,8 +1384,8 @@ class LinkLinkView extends ItemView {
         }
       );
 
-      header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
-      const controls = header.createEl('div', { cls: 'll-controls' });
+      header.createSpan({ text: activeFile.basename, cls: 'll-title' });
+      const controls = header.createDiv({ cls: 'll-controls' });
 
       // Mode buttons — left of refresh button
       if (this.plugin.settings.selectionModeEnabled) {
@@ -1411,11 +1411,11 @@ class LinkLinkView extends ItemView {
         }
       );
 
-      const toggle  = controls.createEl('div', {
+      const toggle  = controls.createDiv({
         cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
         title: isGraph ? 'Switch to list' : 'Switch to graph',
       });
-      const knob = toggle.createEl('div', { cls: 'll-view-toggle-knob' });
+      const knob = toggle.createDiv({ cls: 'll-view-toggle-knob' });
       setIcon(knob, isGraph ? 'network' : 'list');
       toggle.addEventListener('click', () => void (async () => {
         this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
@@ -1453,9 +1453,9 @@ class LinkLinkView extends ItemView {
   // actionable, the indexing action move into the graph's warning badge, or
   // stay as the inline banner above the list in list mode.
   private renderMissingEmbeddingPanel(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile) {
-    const header = el.createEl('div', { cls: 'll-header' });
-    header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
-    const controls = header.createEl('div', { cls: 'll-controls' });
+    const header = el.createDiv({ cls: 'll-header' });
+    header.createSpan({ text: activeFile.basename, cls: 'll-title' });
+    const controls = header.createDiv({ cls: 'll-controls' });
     if (this.plugin.settings.selectionModeEnabled) {
       this.createSelectionBtn(controls);
       this.updateSelectionBtn();
@@ -1465,11 +1465,11 @@ class LinkLinkView extends ItemView {
     }
 
     const isGraph = this.plugin.settings.viewMode === 'graph';
-    const toggle  = controls.createEl('div', {
+    const toggle  = controls.createDiv({
       cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
       title: isGraph ? 'Switch to list' : 'Switch to graph',
     });
-    const knob = toggle.createEl('div', { cls: 'll-view-toggle-knob' });
+    const knob = toggle.createDiv({ cls: 'll-view-toggle-knob' });
     setIcon(knob, isGraph ? 'network' : 'list');
     toggle.addEventListener('click', () => void (async () => {
       this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
@@ -1562,7 +1562,7 @@ class LinkLinkView extends ItemView {
   }
 
   private renderEmbeddingErrorBody(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile, isExcluded: boolean) {
-    const body = el.createEl('div', { cls: 'll-emb-error' });
+    const body = el.createDiv({ cls: 'll-emb-error' });
 
     const msgText = isExcluded
       ? `No embedding for "${err.fileName}", it is excluded from indexing.`
@@ -1581,13 +1581,13 @@ class LinkLinkView extends ItemView {
       });
     } else {
       body.createEl('p', { text: 'Click to index the active note.', cls: 'll-error-hint' });
-      const btnRow = body.createEl('div', { cls: 'll-reindex-row' });
+      const btnRow = body.createDiv({ cls: 'll-reindex-row' });
       const btn = btnRow.createEl('button', { text: 'Index note', cls: 'll-action-btn ll-action-btn-accent' });
-      const progressWrap = body.createEl('div', { cls: 'll-progress-wrap' });
+      const progressWrap = body.createDiv({ cls: 'll-progress-wrap' });
       progressWrap.setCssStyles({ display: 'none' });
       const progLabel = body.createEl('p', { cls: 'll-prog-label' });
       progLabel.setCssStyles({ display: 'none' });
-      const bar = progressWrap.createEl('div', { cls: 'll-progress-bar' });
+      const bar = progressWrap.createDiv({ cls: 'll-progress-bar' });
 
       btn.addEventListener('click', () => void (async () => {
         btn.disabled = true;
@@ -1618,8 +1618,8 @@ class LinkLinkView extends ItemView {
   }
 
   private renderList(el: HTMLElement, results: ResultEntry[], activeFile: TFile) {
-    const wrap = el.createEl('div', { cls: 'll-list-wrap' });
-    const list = wrap.createEl('div', { cls: 'll-list' });
+    const wrap = el.createDiv({ cls: 'll-list-wrap' });
+    const list = wrap.createDiv({ cls: 'll-list' });
     const scores = results.map(r => r.score).filter(s => s > 0);
     const minScore = scores.length > 0 ? Math.min(...scores) : 0;
     const maxScore = scores.length > 0 ? Math.max(...scores) : 1;
@@ -1628,12 +1628,12 @@ class LinkLinkView extends ItemView {
     // Selection/Live mode entry at top of list
     if (this.textSearchState !== null) {
       const state    = this.textSearchState;
-      const entry    = list.createEl('div', { cls: 'll-sel-entry expanded' });
+      const entry    = list.createDiv({ cls: 'll-sel-entry expanded' });
       let expanded   = true;
-      const iconEl   = entry.createEl('span', { cls: 'll-sel-entry-icon' });
+      const iconEl   = entry.createSpan({ cls: 'll-sel-entry-icon' });
       setIcon(iconEl, state.origin === 'live' ? 'text-search' : 'highlighter');
-      entry.createEl('span', { text: state.sourceFile.basename, cls: 'll-sel-entry-source' });
-      const previewEl = entry.createEl('span', { cls: 'll-sel-entry-preview' });
+      entry.createSpan({ text: state.sourceFile.basename, cls: 'll-sel-entry-source' });
+      const previewEl = entry.createSpan({ cls: 'll-sel-entry-preview' });
       const preview   = state.text.length > 120 ? state.text.slice(0, 120) + '…' : state.text;
       previewEl.setText(preview);
       let hideSelTip: (() => void) | null = null;
@@ -1644,7 +1644,7 @@ class LinkLinkView extends ItemView {
         if (!expanded) { expanded = true; entry.addClass('expanded'); previewEl.show(); return; }
         new SelectionTextPopup(this.app, state).open();
       });
-      const collapseBtn = entry.createEl('span', { cls: 'll-sel-entry-collapse', title: 'Collapse' });
+      const collapseBtn = entry.createSpan({ cls: 'll-sel-entry-collapse', title: 'Collapse' });
       setIcon(collapseBtn, 'chevron-up');
       collapseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1663,8 +1663,8 @@ class LinkLinkView extends ItemView {
       let isOutgoing = initIsOutgoing;
       let isBacklink = initIsBacklink;
 
-      const item    = list.createEl('div', { cls: 'll-item' });
-      const scoreEl = item.createEl('span', { cls: 'll-score' });
+      const item    = list.createDiv({ cls: 'll-item' });
+      const scoreEl = item.createSpan({ cls: 'll-score' });
       if (score > 0) {
         scoreEl.setText(score.toFixed(2));
         const bg = scoreToColor(score, this.plugin.settings, minScore, maxScore);
@@ -1678,8 +1678,8 @@ class LinkLinkView extends ItemView {
       }
 
       // O (outgoing) always before B (backlink); pre-created for in-place updates
-      const badgeO = item.createEl('span', { cls: 'll-ref-badge', text: 'O' });
-      const badgeB = item.createEl('span', { cls: 'll-ref-badge', text: 'B' });
+      const badgeO = item.createSpan({ cls: 'll-ref-badge', text: 'O' });
+      const badgeB = item.createSpan({ cls: 'll-ref-badge', text: 'B' });
       const renderBadges = () => {
         badgeO.setCssStyles({ display: isOutgoing ? '' : 'none' });
         badgeB.setCssStyles({ display: isBacklink ? '' : 'none' });
@@ -1695,7 +1695,7 @@ class LinkLinkView extends ItemView {
       attachTip(badgeO, 'Outgoing link', 'This note is referenced in the current note\'s body text.');
       attachTip(badgeB, 'Backlink',      'The current note is referenced by this note.');
 
-      item.createEl('span', { text: file.basename, cls: 'll-link' })
+      item.createSpan({ text: file.basename, cls: 'll-link' })
         .addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const menu = new Menu();
@@ -1708,6 +1708,7 @@ class LinkLinkView extends ItemView {
         const fm = this.app.metadataCache.getFileCache(activeFile)?.frontmatter;
         const val: unknown = fm?.[field];
         if (!val) return [];
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- frontmatter values are unknown-shaped user data; a non-string entry just won't match a "[[link]]" wikilink string, which is the only thing compared below
         return Array.isArray(val) ? val.map(String) : [String(val)];
       };
 
@@ -1796,7 +1797,7 @@ class LinkLinkView extends ItemView {
             isDragging = true;
             wasDragged = true;
             dragGhost?.remove();
-            dragGhost = activeDocument.body.createEl('div', { cls: 'll-drag-ghost' });
+            dragGhost = activeDocument.body.createDiv({ cls: 'll-drag-ghost' });
             dragGhost.setText(`[[${file.basename}]]`);
             item.setCssStyles({ cursor: 'grabbing' });
           }
@@ -1839,7 +1840,7 @@ class LinkLinkView extends ItemView {
   }
 
   private renderGraph(el: HTMLElement, currentFile: TFile, results: ResultEntry[], centerWarning?: CenterWarningInfo) {
-    const wrap   = el.createEl('div', { cls: 'll-graph-wrap' });
+    const wrap   = el.createDiv({ cls: 'll-graph-wrap' });
     const canvas = wrap.createEl('canvas', { cls: 'll-graph' });
     const linked = this.plugin.getLinkedPaths(currentFile, results);
 
@@ -1870,6 +1871,7 @@ class LinkLinkView extends ItemView {
           const fm = this.app.metadataCache.getFileCache(currentFile)?.frontmatter;
           const raw: unknown = fm?.[field];
           if (!raw) return [];
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- frontmatter values are unknown-shaped user data; a non-string entry just won't match a "[[link]]" wikilink string, which is the only thing compared below
           return Array.isArray(raw) ? raw.map(String) : [String(raw)];
         };
         const isInFrontmatter = getRelated().some(r => r === `[[${f.basename}]]`);
@@ -1910,30 +1912,30 @@ class LinkLinkView extends ItemView {
     const minS = rScores.length > 0 ? Math.min(...rScores) : 0;
     const maxS = rScores.length > 0 ? Math.max(...rScores) : 1;
     const span = maxS - minS;
-    const legend = el.createEl('div', { cls: 'll-legend' });
+    const legend = el.createDiv({ cls: 'll-legend' });
 
     // Row 1: similarity color legend
-    const colorRow = legend.createEl('div', { cls: 'll-legend-row' });
+    const colorRow = legend.createDiv({ cls: 'll-legend-row' });
     for (const [color, label] of [
       [settings.colorCenter, 'current'],
       [settings.colorHigh, `≥ ${(minS + (2 * span) / 3).toFixed(2)}`],
       [settings.colorMid,  `≥ ${(minS + span / 3).toFixed(2)}`],
       [settings.colorLow,  `< ${(minS + span / 3).toFixed(2)}`],
     ] as [string, string][]) {
-      const item = colorRow.createEl('span', { cls: 'll-legend-item' });
-      item.createEl('span', { cls: 'll-legend-dot' }).setCssStyles({ background: color });
-      item.createEl('span', { text: label });
+      const item = colorRow.createSpan({ cls: 'll-legend-item' });
+      item.createSpan({ cls: 'll-legend-dot' }).setCssStyles({ background: color });
+      item.createSpan({ text: label });
     }
 
     // Row 2: node type markers + drag tip
-    const typeRow = legend.createEl('div', { cls: 'll-legend-row' });
-    const oTypeItem = typeRow.createEl('span', { cls: 'll-legend-item' });
-    oTypeItem.createEl('span', { cls: 'll-legend-node ll-legend-node-o' });
-    oTypeItem.createEl('span', { text: 'Outgoing link' });
-    const bTypeItem = typeRow.createEl('span', { cls: 'll-legend-item' });
-    bTypeItem.createEl('span', { cls: 'll-legend-node ll-legend-node-b' });
-    bTypeItem.createEl('span', { text: 'Backlink' });
-    typeRow.createEl('span', { text: 'Drag out → insert [[link]]', cls: 'll-legend-item ll-legend-hint' });
+    const typeRow = legend.createDiv({ cls: 'll-legend-row' });
+    const oTypeItem = typeRow.createSpan({ cls: 'll-legend-item' });
+    oTypeItem.createSpan({ cls: 'll-legend-node ll-legend-node-o' });
+    oTypeItem.createSpan({ text: 'Outgoing link' });
+    const bTypeItem = typeRow.createSpan({ cls: 'll-legend-item' });
+    bTypeItem.createSpan({ cls: 'll-legend-node ll-legend-node-b' });
+    bTypeItem.createSpan({ text: 'Backlink' });
+    typeRow.createSpan({ text: 'Drag out → insert [[link]]', cls: 'll-legend-item ll-legend-hint' });
   }
 }
 
@@ -2041,15 +2043,15 @@ class SelectionTextPopup extends Modal {
     contentEl.empty();
     this.modalEl.addClass('ll-sel-popup');
 
-    contentEl.createEl('div', { text: this.state.origin === 'live' ? 'Tracked text' : 'Selected text', cls: 'll-sel-popup-title' });
-    contentEl.createEl('div', { cls: 'll-sel-popup-sep' });
+    contentEl.createDiv({ text: this.state.origin === 'live' ? 'Tracked text' : 'Selected text', cls: 'll-sel-popup-title' });
+    contentEl.createDiv({ cls: 'll-sel-popup-sep' });
 
-    const textEl = contentEl.createEl('div', { cls: 'll-sel-popup-text' });
+    const textEl = contentEl.createDiv({ cls: 'll-sel-popup-text' });
     textEl.setText(this.state.text);
 
-    contentEl.createEl('div', { cls: 'll-sel-popup-sep' });
-    const footer = contentEl.createEl('div', { cls: 'll-sel-popup-footer' });
-    const sourceWrap = footer.createEl('span', { cls: 'll-sel-popup-source' });
+    contentEl.createDiv({ cls: 'll-sel-popup-sep' });
+    const footer = contentEl.createDiv({ cls: 'll-sel-popup-footer' });
+    const sourceWrap = footer.createSpan({ cls: 'll-sel-popup-source' });
     sourceWrap.appendText('Source: ');
     const sourceLink = sourceWrap.createEl('a', { text: this.state.sourceFile.basename, cls: 'll-sel-popup-source-link' });
     sourceLink.addEventListener('click', (e) => {
@@ -2058,7 +2060,7 @@ class SelectionTextPopup extends Modal {
       void this.app.workspace.openLinkText(this.state.sourceFile.path, '', false);
     });
 
-    const btnRow = footer.createEl('div', { cls: 'll-sel-popup-btn-row' });
+    const btnRow = footer.createDiv({ cls: 'll-sel-popup-btn-row' });
 
     // Find button — navigates to the exact occurrence that was originally selected
     const findBtn = btnRow.createEl('button', { text: '🔍 Find', cls: 'll-action-btn ll-action-btn-accent' });
@@ -2126,10 +2128,10 @@ class IndexProgressPopup {
   isFinished = false;
 
   constructor() {
-    this.el = activeDocument.body.createEl('div', { cls: 'll-idx-popup' });
+    this.el = activeDocument.body.createDiv({ cls: 'll-idx-popup' });
 
-    const header = this.el.createEl('div', { cls: 'll-idx-popup-header' });
-    this.titleEl = header.createEl('span', { text: 'Link Link! — Indexing', cls: 'll-idx-popup-title' });
+    const header = this.el.createDiv({ cls: 'll-idx-popup-header' });
+    this.titleEl = header.createSpan({ text: 'Link Link! — Indexing', cls: 'll-idx-popup-title' });
     const closeBtn = header.createEl('button', { cls: 'll-idx-popup-close', text: '×' });
     closeBtn.addEventListener('click', () => {
       this.dismissed = true;
@@ -2137,12 +2139,12 @@ class IndexProgressPopup {
       this.close();
     });
 
-    this.phraseEl = this.el.createEl('div', { cls: 'll-idx-popup-phrase' });
+    this.phraseEl = this.el.createDiv({ cls: 'll-idx-popup-phrase' });
 
-    const barWrap = this.el.createEl('div', { cls: 'll-progress-wrap' });
-    this.barEl = barWrap.createEl('div', { cls: 'll-progress-bar indeterminate' });
+    const barWrap = this.el.createDiv({ cls: 'll-progress-wrap' });
+    this.barEl = barWrap.createDiv({ cls: 'll-progress-bar indeterminate' });
 
-    this.statusEl = this.el.createEl('div', { cls: 'll-idx-popup-status' });
+    this.statusEl = this.el.createDiv({ cls: 'll-idx-popup-status' });
 
     this.stopPhrases = startPhraseRotator(this.phraseEl, INDEX_PHRASES, 3500, true);
   }
@@ -2714,25 +2716,25 @@ function filterSection(
   values: string[],
   onChange: (v: string[]) => Promise<void>
 ) {
-  const section = parent.createEl('div', { cls: 'll-filter-section' });
-  const body    = section.createEl('div', { cls: 'll-filter-body' });
-  const left    = body.createEl('div',   { cls: 'll-filter-left' });
-  left.createEl('div', { text: title, cls: 'll-filter-title' });
-  left.createEl('div', { text: desc,  cls: 'll-filter-desc'  });
+  const section = parent.createDiv({ cls: 'll-filter-section' });
+  const body    = section.createDiv({ cls: 'll-filter-body' });
+  const left    = body.createDiv({ cls: 'll-filter-left' });
+  left.createDiv({ text: title, cls: 'll-filter-title' });
+  left.createDiv({ text: desc,  cls: 'll-filter-desc'  });
 
-  const right    = body.createEl('div', { cls: 'll-filter-right' });
-  const chipZone = right.createEl('div', { cls: 'll-chip-zone' });
+  const right    = body.createDiv({ cls: 'll-filter-right' });
+  const chipZone = right.createDiv({ cls: 'll-chip-zone' });
 
   const renderChips = () => {
     chipZone.empty();
     if (values.length === 0) {
-      chipZone.createEl('div', { cls: 'll-chip-empty', text: 'No patterns configured' });
+      chipZone.createDiv({ cls: 'll-chip-empty', text: 'No patterns configured' });
     } else {
       for (const v of values) {
-        const chip = chipZone.createEl('span', { cls: 'll-chip' });
-        const iconEl = chip.createEl('span', { cls: 'll-chip-icon' });
+        const chip = chipZone.createSpan({ cls: 'll-chip' });
+        const iconEl = chip.createSpan({ cls: 'll-chip-icon' });
         setIcon(iconEl, v.endsWith('/') ? 'folder' : 'file-text');
-        chip.createEl('span', { text: v, cls: 'll-chip-text' });
+        chip.createSpan({ text: v, cls: 'll-chip-text' });
         const x = chip.createEl('button', { cls: 'll-chip-x', text: '×' });
         x.addEventListener('click', () => void (async () => {
           values.splice(values.indexOf(v), 1);
@@ -2744,10 +2746,10 @@ function filterSection(
   };
   renderChips();
 
-  const addRow = right.createEl('div', { cls: 'll-filter-add-row' });
+  const addRow = right.createDiv({ cls: 'll-filter-add-row' });
   const addBtn = addRow.createEl('button', { cls: 'll-filter-add' });
   setIcon(addBtn, 'plus');
-  addBtn.createEl('span', { text: 'Add…' });
+  addBtn.createSpan({ text: 'Add…' });
   addBtn.addEventListener('click', () => {
     new PathSuggestModal(app, (path) => {
       if (!values.includes(path)) {
@@ -2776,13 +2778,13 @@ class OllamaModelModal extends Modal {
 
     contentEl.createEl('h3', { text: this.existing ? 'Edit model' : 'Add custom embedding model', cls: 'll-modal-heading' });
 
-    const form = contentEl.createEl('div', { cls: 'll-modal-form' });
+    const form = contentEl.createDiv({ cls: 'll-modal-form' });
 
     const makeField = (label: string, required: boolean) => {
-      const f = form.createEl('div', { cls: 'll-modal-field' });
+      const f = form.createDiv({ cls: 'll-modal-field' });
       const lbl = f.createEl('label', { cls: 'll-modal-label' });
-      lbl.createEl('span', { text: label });
-      if (required) lbl.createEl('span', { text: ' *', cls: 'll-modal-required' });
+      lbl.createSpan({ text: label });
+      if (required) lbl.createSpan({ text: ' *', cls: 'll-modal-required' });
       return f;
     };
 
@@ -2804,7 +2806,7 @@ class OllamaModelModal extends Modal {
     urlInput.value = this.existing?.baseUrl ?? '';
     urlField.createEl('p', { text: 'Leave URL blank unless using a proxy.', cls: 'll-modal-hint' });
 
-    const btns = contentEl.createEl('div', { cls: 'll-modal-btns' });
+    const btns = contentEl.createDiv({ cls: 'll-modal-btns' });
     btns.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' })
       .addEventListener('click', () => this.close());
     const saveBtn = btns.createEl('button', {
@@ -2877,16 +2879,16 @@ class SetupWizardModal extends Modal {
 
     // ── Progress bar ─────────────────────────────────────────────────────
     const labels = this.stepLabels();
-    const prog = contentEl.createEl('div', { cls: 'll-wiz-progress' });
+    const prog = contentEl.createDiv({ cls: 'll-wiz-progress' });
     labels.forEach((label, i) => {
-      if (i > 0) prog.createEl('div', { cls: 'll-wiz-line' + (i <= this.step ? ' filled' : '') });
-      const wrap = prog.createEl('div', { cls: 'll-wiz-step-wrap' });
-      wrap.createEl('div', { cls: 'll-wiz-node' + (i < this.step ? ' done' : i === this.step ? ' active' : '') });
-      wrap.createEl('span', { text: label, cls: 'll-wiz-node-label' + (i === this.step ? ' active' : '') });
+      if (i > 0) prog.createDiv({ cls: 'll-wiz-line' + (i <= this.step ? ' filled' : '') });
+      const wrap = prog.createDiv({ cls: 'll-wiz-step-wrap' });
+      wrap.createDiv({ cls: 'll-wiz-node' + (i < this.step ? ' done' : i === this.step ? ' active' : '') });
+      wrap.createSpan({ text: label, cls: 'll-wiz-node-label' + (i === this.step ? ' active' : '') });
     });
 
     // ── Step body ─────────────────────────────────────────────────────────
-    const body = contentEl.createEl('div', { cls: 'll-wiz-body' });
+    const body = contentEl.createDiv({ cls: 'll-wiz-body' });
     const ex = this.chosenModel === 'existing';
     if      (this.step === 0) this.renderWelcome(body);
     else if (this.step === 1) this.renderModel(body);
@@ -2899,18 +2901,18 @@ class SetupWizardModal extends Modal {
   private goTo(step: number) { this.step = step; this.render(); }
 
   private mkFooter(body: HTMLElement, onBack?: () => void): HTMLElement {
-    const row = body.createEl('div', { cls: 'll-wiz-footer' });
+    const row = body.createDiv({ cls: 'll-wiz-footer' });
     if (this.step > 0) {
       const back = row.createEl('button', { text: '← Back', cls: 'll-action-btn ll-action-btn-secondary' });
       back.addEventListener('click', onBack ?? (() => this.goTo(this.step - 1)));
     }
-    row.createEl('div', { cls: 'll-wiz-footer-spacer' });
+    row.createDiv({ cls: 'll-wiz-footer-spacer' });
     return row;
   }
 
   // ── Step 0: Welcome ───────────────────────────────────────────────────────
   private renderWelcome(body: HTMLElement) {
-    body.createEl('div', { text: 'Welcome to Link Link!', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'Welcome to Link Link!', cls: 'll-wiz-title' });
     body.createEl('p', {
       text: 'Link Link! finds semantically related notes in your vault using embeddings — a compact numerical representation of what each note means.',
       cls: 'll-wiz-desc',
@@ -2928,7 +2930,7 @@ class SetupWizardModal extends Modal {
 
   // ── Step 1: Model ─────────────────────────────────────────────────────────
   private renderModel(body: HTMLElement) {
-    body.createEl('div', { text: 'Choose embedding model', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'Choose embedding model', cls: 'll-wiz-title' });
 
     const MODELS: { id: 'builtin' | 'local' | 'existing'; label: string; desc: string; req: string }[] = [
       { id: 'builtin',  label: 'Built-in (lightweight)', desc: 'Downloads automatically the first time you index your vault (~25 MB), then runs fully offline, with no additional setup required.', req: 'No requirements' },
@@ -2937,10 +2939,10 @@ class SetupWizardModal extends Modal {
     ];
 
     let selected = this.chosenModel;
-    const cards = body.createEl('div', { cls: 'll-wiz-cards' });
+    const cards = body.createDiv({ cls: 'll-wiz-cards' });
 
     // Ollama inline form
-    const ollamaWrap = body.createEl('div', { cls: 'll-wiz-ollama-wrap' });
+    const ollamaWrap = body.createDiv({ cls: 'll-wiz-ollama-wrap' });
     ollamaWrap.setCssStyles({ display: selected === 'local' ? '' : 'none' });
     const nameInput = ollamaWrap.createEl('input', { type: 'text', cls: 'll-modal-input' });
     nameInput.placeholder = 'Model name (e.g. bge-m3)';
@@ -2954,9 +2956,9 @@ class SetupWizardModal extends Modal {
     urlInput.placeholder = 'Base URL (default: http://localhost:11434)';
     urlInput.value = this.wzOllamaUrl;
     ollamaWrap.createEl('p', { text: 'Leave URL blank unless using a proxy.', cls: 'll-modal-hint' });
-    const connRow = ollamaWrap.createEl('div', { cls: 'll-wiz-conn-row' });
+    const connRow = ollamaWrap.createDiv({ cls: 'll-wiz-conn-row' });
     const checkBtn = connRow.createEl('button', { text: 'Check connection', cls: 'll-action-btn ll-action-btn-secondary' });
-    const connBadge = connRow.createEl('span', { cls: 'll-wiz-conn-badge' });
+    const connBadge = connRow.createSpan({ cls: 'll-wiz-conn-badge' });
     let localVerified = !!this.wzOllamaId; // pre-verified if a model was already saved
     if (this.wzOllamaId) { connBadge.setText('✓ Saved'); connBadge.addClass('ll-wiz-conn-ok'); }
 
@@ -3012,10 +3014,10 @@ class SetupWizardModal extends Modal {
     })());
 
     for (const m of MODELS) {
-      const card = cards.createEl('div', { cls: 'll-wiz-card' + (selected === m.id ? ' selected' : '') });
-      card.createEl('div', { text: m.label, cls: 'll-wiz-card-title' });
-      card.createEl('div', { text: m.desc,  cls: 'll-wiz-card-desc' });
-      card.createEl('div', { text: m.req,   cls: 'll-wiz-card-req' });
+      const card = cards.createDiv({ cls: 'll-wiz-card' + (selected === m.id ? ' selected' : '') });
+      card.createDiv({ text: m.label, cls: 'll-wiz-card-title' });
+      card.createDiv({ text: m.desc,  cls: 'll-wiz-card-desc' });
+      card.createDiv({ text: m.req,   cls: 'll-wiz-card-req' });
       card.addEventListener('click', () => {
         cards.querySelectorAll('.ll-wiz-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
@@ -3028,7 +3030,7 @@ class SetupWizardModal extends Modal {
 
   // ── Step 2a: Targeting (builtin/local) ───────────────────────────────────
   private renderTargeting(body: HTMLElement) {
-    body.createEl('div', { text: 'Indexing scope', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'Indexing scope', cls: 'll-wiz-title' });
     body.createEl('p', {
       text: 'Indexing reads each note and creates a compact semantic fingerprint — everything runs locally, nothing leaves your machine.',
       cls: 'll-wiz-desc',
@@ -3039,12 +3041,12 @@ class SetupWizardModal extends Modal {
     });
 
     const S = this.S;
-    const section = body.createEl('div', { cls: 'll-action-section ll-action-section-flat' });
-    const modeHeader = section.createEl('div', { cls: 'll-filter-mode-header' });
-    modeHeader.createEl('span', { text: 'Targeting mode', cls: 'll-filter-mode-label' });
-    const modeRow = modeHeader.createEl('div', { cls: 'll-mode-row' });
+    const section = body.createDiv({ cls: 'll-action-section ll-action-section-flat' });
+    const modeHeader = section.createDiv({ cls: 'll-filter-mode-header' });
+    modeHeader.createSpan({ text: 'Targeting mode', cls: 'll-filter-mode-label' });
+    const modeRow = modeHeader.createDiv({ cls: 'll-mode-row' });
     const modeDesc = section.createEl('p', { cls: 'll-mode-desc' });
-    const filterWrap = section.createEl('div');
+    const filterWrap = section.createDiv();
 
     const updateModeDesc = () => modeDesc.setText(
       S.indexMode === 'exclude'
@@ -3079,20 +3081,20 @@ class SetupWizardModal extends Modal {
 
   // ── Step 2b: Index file (existing) ───────────────────────────────────────
   private renderIndexFile(body: HTMLElement) {
-    body.createEl('div', { text: 'Select index file', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'Select index file', cls: 'll-wiz-title' });
     body.createEl('p', {
       text: 'Link Link! will read an existing embedding index from inside your vault. Select the file below, or enter its path manually.',
       cls: 'll-wiz-desc',
     });
 
     const S = this.S;
-    const detectedWrap = body.createEl('div', { cls: 'll-detected-wrap' });
-    const detectedHeader = detectedWrap.createEl('div', { cls: 'll-detected-header' });
-    detectedHeader.createEl('span', { text: 'Auto-detected index files', cls: 'll-detected-title' });
+    const detectedWrap = body.createDiv({ cls: 'll-detected-wrap' });
+    const detectedHeader = detectedWrap.createDiv({ cls: 'll-detected-header' });
+    detectedHeader.createSpan({ text: 'Auto-detected index files', cls: 'll-detected-title' });
     const scanBtn = detectedHeader.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-    setIcon(scanBtn.createEl('span', { cls: 'll-btn-icon' }), 'search');
-    scanBtn.createEl('span', { text: 'Scan' });
-    const detectedList = detectedWrap.createEl('div', { cls: 'll-detected-list' });
+    setIcon(scanBtn.createSpan({ cls: 'll-btn-icon' }), 'search');
+    scanBtn.createSpan({ text: 'Scan' });
+    const detectedList = detectedWrap.createDiv({ cls: 'll-detected-list' });
 
     let pathInput!: HTMLInputElement;
     let nextBtn!: HTMLButtonElement;
@@ -3102,11 +3104,11 @@ class SetupWizardModal extends Modal {
       detectedList.empty();
       if (!files.length) { detectedList.createEl('p', { text: 'No index files found.', cls: 'll-detected-empty' }); return; }
       for (const f of files) {
-        const row = detectedList.createEl('div', { cls: 'll-detected-row' });
+        const row = detectedList.createDiv({ cls: 'll-detected-row' });
         const cb = row.createEl('input'); cb.type = 'checkbox'; cb.checked = S.existingIndexPath === f.path;
-        const lbl = row.createEl('span', { cls: 'll-detected-path' });
-        lbl.createEl('span', { text: f.path, cls: 'll-detected-path-text' });
-        lbl.createEl('span', { text: f.format, cls: 'll-detected-format' });
+        const lbl = row.createSpan({ cls: 'll-detected-path' });
+        lbl.createSpan({ text: f.path, cls: 'll-detected-path-text' });
+        lbl.createSpan({ text: f.format, cls: 'll-detected-format' });
         cb.addEventListener('change', () => void (async () => {
           S.existingIndexPath = cb.checked ? f.path : '';
           if (cb.checked) detectedList.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c => { if (c !== cb) c.checked = false; });
@@ -3156,23 +3158,23 @@ class SetupWizardModal extends Modal {
 
   // ── Step 3b: Index vault (builtin/local) ─────────────────────────────────
   private renderIndex(body: HTMLElement) {
-    body.createEl('div', { text: 'Index your vault', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'Index your vault', cls: 'll-wiz-title' });
     body.createEl('p', {
       text: 'Indexing reads each note and builds a compact semantic fingerprint stored in a separate file — your notes are never modified. Everything runs locally, nothing leaves your machine.',
       cls: 'll-wiz-desc',
     });
 
-    const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' });
+    const progressWrap = body.createDiv({ cls: 'll-wiz-prog-wrap' });
     progressWrap.setCssStyles({ display: 'none' });
     const pctEl    = progressWrap.createEl('p', { cls: 'll-prog-pct' });
     const phraseEl = progressWrap.createEl('p', { cls: 'll-prog-phrase' });
     const progLabel = progressWrap.createEl('p', { cls: 'll-prog-label' });
-    const bar = progressWrap.createEl('div', { cls: 'll-progress-wrap' }).createEl('div', { cls: 'll-progress-bar' });
+    const bar = progressWrap.createDiv({ cls: 'll-progress-wrap' }).createDiv({ cls: 'll-progress-bar' });
     const doneNote = body.createEl('p', { cls: 'll-wiz-ready-note' }); doneNote.setCssStyles({ display: 'none' });
 
     const idxBtn = body.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-    setIcon(idxBtn.createEl('span', { cls: 'll-btn-icon' }), 'database');
-    idxBtn.createEl('span', { text: 'Index Vault' });
+    setIcon(idxBtn.createSpan({ cls: 'll-btn-icon' }), 'database');
+    idxBtn.createSpan({ text: 'Index Vault' });
 
     let isIndexing = false;
     let controller: AbortController | null = null;
@@ -3226,7 +3228,7 @@ class SetupWizardModal extends Modal {
 
   // ── Interlink step (step 4 for builtin/local, step 3 for existing) ────────
   private renderInterlink(body: HTMLElement) {
-    body.createEl('div', { text: 'Interlink your vault', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'Interlink your vault', cls: 'll-wiz-title' });
     body.createEl('p', {
       text: 'Interlink command writes your top related notes into each note\'s frontmatter as [[links]], making connections visible in Graph View. Only the dedicated frontmatter field is modified. Your other content stays intact.',
       cls: 'll-wiz-desc',
@@ -3235,13 +3237,13 @@ class SetupWizardModal extends Modal {
     const S = this.S;
 
     // ── Field name ────────────────────────────────────────────────────────
-    const fieldSection = body.createEl('div', { cls: 'll-wiz-field-section' });
-    fieldSection.createEl('div', { text: 'Frontmatter field', cls: 'll-wiz-section-label' });
+    const fieldSection = body.createDiv({ cls: 'll-wiz-field-section' });
+    fieldSection.createDiv({ text: 'Frontmatter field', cls: 'll-wiz-section-label' });
     fieldSection.createEl('p', { text: 'By default the command uses the `related` frontmatter field.', cls: 'll-modal-hint' });
 
-    const statusWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-status' });
-    const choiceWrap     = fieldSection.createEl('div', { cls: 'll-wiz-field-choice' });
-    const fieldInputWrap = fieldSection.createEl('div', { cls: 'll-wiz-field-input-wrap' });
+    const statusWrap     = fieldSection.createDiv({ cls: 'll-wiz-field-status' });
+    const choiceWrap     = fieldSection.createDiv({ cls: 'll-wiz-field-choice' });
+    const fieldInputWrap = fieldSection.createDiv({ cls: 'll-wiz-field-input-wrap' });
     const fieldInput     = fieldInputWrap.createEl('input', { type: 'text', cls: 'll-modal-input' });
     const fieldErr       = fieldInputWrap.createEl('p', { cls: 'll-modal-error' }); fieldErr.setCssStyles({ display: 'none' });
     const fieldDesc      = fieldInputWrap.createEl('p', { cls: 'll-modal-hint' }); fieldDesc.setCssStyles({ display: 'none' });
@@ -3249,7 +3251,7 @@ class SetupWizardModal extends Modal {
     let lastValidField        = S.relatedFieldName;
     let fieldReady            = false;
     let createNewFieldDefault = '';
-    const fieldConfirmRow = fieldSection.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
+    const fieldConfirmRow = fieldSection.createDiv({ cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
     fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
       fieldInput.value = lastValidField; fieldErr.setCssStyles({ display: 'none' }); fieldConfirmRow.setCssStyles({ display: 'none' });
     });
@@ -3263,17 +3265,17 @@ class SetupWizardModal extends Modal {
     })());
 
     // Interlink action area
-    body.createEl('div', { cls: 'll-section-sep' });
-    const progressWrap = body.createEl('div', { cls: 'll-wiz-prog-wrap' }); progressWrap.setCssStyles({ display: 'none' });
+    body.createDiv({ cls: 'll-section-sep' });
+    const progressWrap = body.createDiv({ cls: 'll-wiz-prog-wrap' }); progressWrap.setCssStyles({ display: 'none' });
     const pctEl    = progressWrap.createEl('p', { cls: 'll-prog-pct' });
     const phraseEl = progressWrap.createEl('p', { cls: 'll-prog-phrase' });
     const progLabel = progressWrap.createEl('p', { cls: 'll-prog-label' });
-    const bar = progressWrap.createEl('div', { cls: 'll-progress-wrap' }).createEl('div', { cls: 'll-progress-bar' });
-    const doneWrap = body.createEl('div', { cls: 'll-wiz-done-wrap' }); doneWrap.setCssStyles({ display: 'none' });
+    const bar = progressWrap.createDiv({ cls: 'll-progress-wrap' }).createDiv({ cls: 'll-progress-bar' });
+    const doneWrap = body.createDiv({ cls: 'll-wiz-done-wrap' }); doneWrap.setCssStyles({ display: 'none' });
 
     const ilBtn = body.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-    setIcon(ilBtn.createEl('span', { cls: 'll-btn-icon' }), 'git-branch');
-    ilBtn.createEl('span', { text: 'Interlink Vault' });
+    setIcon(ilBtn.createSpan({ cls: 'll-btn-icon' }), 'git-branch');
+    ilBtn.createSpan({ text: 'Interlink Vault' });
     ilBtn.disabled = true;
 
     const footerRow = this.mkFooter(body);
@@ -3471,8 +3473,8 @@ class SetupWizardModal extends Modal {
         stopPhrases();
         progressWrap.setCssStyles({ display: 'none' }); doneWrap.setCssStyles({ display: '' });
         doneWrap.createEl('p', { text: '✓ ' + updated + ' notes connected.', cls: 'll-wiz-ready-note' });
-        const graphRow = doneWrap.createEl('div', { cls: 'll-wiz-graph-row' });
-        graphRow.createEl('span', { text: 'Open Graph View to see your vault\'s new connected state.', cls: 'll-wiz-done-desc' });
+        const graphRow = doneWrap.createDiv({ cls: 'll-wiz-graph-row' });
+        graphRow.createSpan({ text: 'Open Graph View to see your vault\'s new connected state.', cls: 'll-wiz-done-desc' });
         const graphBtn = graphRow.createEl('button', { text: 'Open Graph View', cls: 'll-action-btn ll-action-btn-secondary' });
         graphBtn.addEventListener('click', () => {
           (this.app as unknown as { commands: { executeCommandById: (id: string) => unknown } }).commands.executeCommandById('graph:open');
@@ -3502,7 +3504,7 @@ class SetupWizardModal extends Modal {
   }
   // ── Done ─────────────────────────────────────────────────────────────────
   private renderDone(body: HTMLElement) {
-    body.createEl('div', { text: 'You\'re all set!', cls: 'll-wiz-title' });
+    body.createDiv({ text: 'You\'re all set!', cls: 'll-wiz-title' });
     body.createEl('p', { text: 'Link Link! is ready to go. Open the related notes panel to start exploring connections.', cls: 'll-wiz-desc' });
     body.createEl('p', {
       text: 'Open Settings → Link Link! to fine-tune thresholds, Top N, display options, and more.',
@@ -3556,8 +3558,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
     const app  = this.app;
 
     // ── Tab bar: Embedding | Interlink Vault | Graph | Selection Mode ────
-    const tabBar = containerEl.createEl('div', { cls: 'll-tab-bar' });
-    const body   = containerEl.createEl('div', { cls: 'll-tab-body' });
+    const tabBar = containerEl.createDiv({ cls: 'll-tab-bar' });
+    const body   = containerEl.createDiv({ cls: 'll-tab-body' });
 
     type TabId = 'embedding' | 'interlink' | 'graph' | 'selection';
     let activeTab: TabId = 'embedding';
@@ -3588,22 +3590,22 @@ class LinkLinkSettingTab extends PluginSettingTab {
       btn.addEventListener('click', () => switchTab(id));
     }
 
-    tabBar.createEl('div', { cls: 'll-tab-spacer' });
+    tabBar.createDiv({ cls: 'll-tab-spacer' });
     const wizBtn = tabBar.createEl('button', { cls: 'll-action-btn ll-action-btn-accent ll-tab-wizard-btn' });
-    setIcon(wizBtn.createEl('span', { cls: 'll-btn-icon' }), 'wand-sparkles');
-    wizBtn.createEl('span', { text: 'Run the wizard' });
+    setIcon(wizBtn.createSpan({ cls: 'll-btn-icon' }), 'wand-sparkles');
+    wizBtn.createSpan({ text: 'Run the wizard' });
     wizBtn.addEventListener('click', () => new SetupWizardModal(this.app, this.plugin).open());
 
     // ── Shared helpers ───────────────────────────────────────────────────
 
     const makeProgress = (parent: HTMLElement, phrases = INDEX_PHRASES) => {
-      const wrap     = parent.createEl('div', { cls: 'll-settings-prog' });
+      const wrap     = parent.createDiv({ cls: 'll-settings-prog' });
       wrap.setCssStyles({ display: 'none' });
       const pctEl    = wrap.createEl('p',   { cls: 'll-prog-pct' });
       const phraseEl = wrap.createEl('p',   { cls: 'll-prog-phrase' });
       const label    = wrap.createEl('p',   { cls: 'll-prog-label' });
-      const track    = wrap.createEl('div', { cls: 'll-progress-wrap' });
-      const bar      = track.createEl('div', { cls: 'll-progress-bar' });
+      const track    = wrap.createDiv({ cls: 'll-progress-wrap' });
+      const bar      = track.createDiv({ cls: 'll-progress-bar' });
 
       let stopPhrases: (() => void) | null = null;
 
@@ -3676,16 +3678,16 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
       // ? tooltip
       const helpBtn = embSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-      const tip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
+      const tip = activeDocument.body.createDiv({ cls: 'll-emb-tooltip' });
       this.tooltipEl = tip;
       for (const [title, body] of [
         ['Built-in (lightweight)', 'Downloads automatically the first time you index your vault (~25 MB), then runs fully offline, with no additional setup required.'],
         ['Local model (Ollama)',   'Use a locally-running Ollama server for full control and more powerful models. Requires Ollama installed and running on your machine.'],
         ['Existing index file',   'Reads an existing index file from inside your vault — for example, one created by the Copilot plugin. Supports any recognized index format.'],
       ] as [string, string][]) {
-        const item = tip.createEl('div', { cls: 'll-tip-item' });
-        item.createEl('div', { text: title, cls: 'll-tip-title' });
-        item.createEl('div', { text: body,  cls: 'll-tip-body' });
+        const item = tip.createDiv({ cls: 'll-tip-item' });
+        item.createDiv({ text: title, cls: 'll-tip-title' });
+        item.createDiv({ text: body,  cls: 'll-tip-body' });
       }
       helpBtn.addEventListener('mouseenter', () => {
         const r = helpBtn.getBoundingClientRect();
@@ -3696,9 +3698,9 @@ class LinkLinkSettingTab extends PluginSettingTab {
       helpBtn.addEventListener('mouseleave', () => tip.classList.remove('visible'));
 
       if (S.embeddingSource === 'builtin') {
-        const info = body.createEl('div', { cls: 'll-model-info' });
-        info.createEl('div', { text: 'bge-small-en-v1.5 by BAAI', cls: 'll-model-info-name' });
-        info.createEl('div', {
+        const info = body.createDiv({ cls: 'll-model-info' });
+        info.createDiv({ text: 'bge-small-en-v1.5 by BAAI', cls: 'll-model-info-name' });
+        info.createDiv({
           text: '384-dimensional sentence embeddings · shipped with the plugin · no downloads, no cloud',
           cls: 'll-model-info-desc',
         });
@@ -3708,16 +3710,16 @@ class LinkLinkSettingTab extends PluginSettingTab {
           window.open('https://huggingface.co/Xenova/bge-small-en-v1.5', '_blank');
         });
       } else if (S.embeddingSource === 'local') {
-        const modelArea = body.createEl('div', { cls: 'll-model-area' });
+        const modelArea = body.createDiv({ cls: 'll-model-area' });
 
         const renderModels = () => {
           modelArea.empty();
 
-          const mh = modelArea.createEl('div', { cls: 'll-model-header' });
-          mh.createEl('span', { text: 'Embedding Models', cls: 'll-model-header-title' });
+          const mh = modelArea.createDiv({ cls: 'll-model-header' });
+          mh.createSpan({ text: 'Embedding Models', cls: 'll-model-header-title' });
           const ab = mh.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-          setIcon(ab.createEl('span', { cls: 'll-btn-icon' }), 'plus');
-          ab.createEl('span', { text: 'Add Model' });
+          setIcon(ab.createSpan({ cls: 'll-btn-icon' }), 'plus');
+          ab.createSpan({ text: 'Add Model' });
           ab.addEventListener('click', () => {
             new OllamaModelModal(app, undefined, async (mn, dn, bu) => {
               const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -3729,17 +3731,17 @@ class LinkLinkSettingTab extends PluginSettingTab {
           });
 
           if (S.ollamaModels.length === 0) {
-            modelArea.createEl('div', {
+            modelArea.createDiv({
               cls: 'll-model-empty',
               text: 'No local models configured — click + Add Model to get started',
             });
           } else {
-            const list = modelArea.createEl('div', { cls: 'll-model-list' });
+            const list = modelArea.createDiv({ cls: 'll-model-list' });
             for (const model of [...S.ollamaModels]) {
-              const row = list.createEl('div', { cls: 'll-model-row' });
+              const row = list.createDiv({ cls: 'll-model-row' });
 
               // Active checkbox (radio-like: checking one unchecks all others)
-              const activeCell = row.createEl('div', { cls: 'll-model-active-cell' });
+              const activeCell = row.createDiv({ cls: 'll-model-active-cell' });
               const chk = activeCell.createEl('input');
               chk.type = 'checkbox'; chk.checked = model.active;
               chk.className = 'll-model-active-chk';
@@ -3752,13 +3754,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
               })());
 
               // Display name
-              row.createEl('div', { cls: 'll-model-name', text: model.displayName || model.modelName });
+              row.createDiv({ cls: 'll-model-name', text: model.displayName || model.modelName });
 
               // Model name (monospace)
-              row.createEl('div', { cls: 'll-model-slug', text: model.modelName });
+              row.createDiv({ cls: 'll-model-slug', text: model.modelName });
 
               // Check connection cell
-              const connCell = row.createEl('div', { cls: 'll-model-conn-cell' });
+              const connCell = row.createDiv({ cls: 'll-model-conn-cell' });
               const checkBtn = connCell.createEl('button', { cls: 'll-model-check-btn', text: 'Check' });
               checkBtn.addEventListener('click', () => void (async () => {
                 checkBtn.disabled = true;
@@ -3778,7 +3780,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                   } catch { return null; }
                 };
 
-                const showBadge = (r: boolean | null) => connCell.createEl('span', {
+                const showBadge = (r: boolean | null) => connCell.createSpan({
                   cls: `ll-conn-badge ${r === true ? 'll-conn-badge-ok' : r === false ? 'll-conn-badge-warn' : 'll-conn-badge-fail'}`,
                   text: r === true ? '✓ Reachable' : r === false ? '! Not installed' : '✗ Unreachable',
                 });
@@ -3788,7 +3790,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                   // Ollama can take a moment to list models after startup —
                   // if server is up but model not yet visible, wait and retry once.
                   if (first === false) {
-                    const loading = connCell.createEl('span', { cls: 'll-conn-badge ll-conn-badge-warn', text: '⟳ Model loading…' });
+                    const loading = connCell.createSpan({ cls: 'll-conn-badge ll-conn-badge-warn', text: '⟳ Model loading…' });
                     await new Promise(r => window.setTimeout(r, 2000));
                     loading.remove();
                     showBadge(await ping());
@@ -3816,7 +3818,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
               // Delete button
               const delBtn = row.createEl('button', { cls: 'll-action-btn ll-action-btn-danger', title: 'Delete model' });
-              setIcon(delBtn.createEl('span', { cls: 'll-btn-icon' }), 'trash-2');
+              setIcon(delBtn.createSpan({ cls: 'll-btn-icon' }), 'trash-2');
               delBtn.addEventListener('click', () => {
                 new ConfirmModal(app,
                   `Delete model "${model.displayName || model.modelName}"?`,
@@ -3845,13 +3847,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
         });
 
         // ── auto-detected files ──────────────────────────────────────────
-        const detectedWrap = body.createEl('div', { cls: 'll-detected-wrap' });
-        const detectedHeader = detectedWrap.createEl('div', { cls: 'll-detected-header' });
-        detectedHeader.createEl('span', { text: 'Auto-detected index files', cls: 'll-detected-title' });
+        const detectedWrap = body.createDiv({ cls: 'll-detected-wrap' });
+        const detectedHeader = detectedWrap.createDiv({ cls: 'll-detected-header' });
+        detectedHeader.createSpan({ text: 'Auto-detected index files', cls: 'll-detected-title' });
         const scanBtn = detectedHeader.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-        setIcon(scanBtn.createEl('span', { cls: 'll-btn-icon' }), 'search');
-        scanBtn.createEl('span', { text: 'Scan' });
-        const detectedList = detectedWrap.createEl('div', { cls: 'll-detected-list' });
+        setIcon(scanBtn.createSpan({ cls: 'll-btn-icon' }), 'search');
+        scanBtn.createSpan({ text: 'Scan' });
+        const detectedList = detectedWrap.createDiv({ cls: 'll-detected-list' });
 
         let pathInput: HTMLInputElement | null = null;
 
@@ -3862,13 +3864,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
             return;
           }
           for (const f of files) {
-            const row = detectedList.createEl('div', { cls: 'll-detected-row' });
+            const row = detectedList.createDiv({ cls: 'll-detected-row' });
             const cb = row.createEl('input');
             cb.type = 'checkbox';
             cb.checked = S.existingIndexPath === f.path;
-            const label = row.createEl('span', { cls: 'll-detected-path' });
-            label.createEl('span', { text: f.path, cls: 'll-detected-path-text' });
-            label.createEl('span', { text: f.format, cls: 'll-detected-format' });
+            const label = row.createSpan({ cls: 'll-detected-path' });
+            label.createSpan({ text: f.path, cls: 'll-detected-path-text' });
+            label.createSpan({ text: f.format, cls: 'll-detected-format' });
             cb.addEventListener('change', () => void (async () => {
               if (!cb.checked) {
                 S.existingIndexPath = '';
@@ -3952,13 +3954,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
       if (S.embeddingSource !== 'existing') {
         new Setting(body).setName('Indexing target').setHeading();
 
-        const targetSection = body.createEl('div', { cls: 'll-action-section ll-action-section-flat' });
-        const modeHeader = targetSection.createEl('div', { cls: 'll-filter-mode-header' });
-        modeHeader.createEl('span', { text: 'Targeting mode', cls: 'll-filter-mode-label' });
-        const modeRow = modeHeader.createEl('div', { cls: 'll-mode-row' });
+        const targetSection = body.createDiv({ cls: 'll-action-section ll-action-section-flat' });
+        const modeHeader = targetSection.createDiv({ cls: 'll-filter-mode-header' });
+        modeHeader.createSpan({ text: 'Targeting mode', cls: 'll-filter-mode-label' });
+        const modeRow = modeHeader.createDiv({ cls: 'll-mode-row' });
 
         const modeDesc = targetSection.createEl('p', { cls: 'll-mode-desc' });
-        const filterWrap = targetSection.createEl('div');
+        const filterWrap = targetSection.createDiv();
 
         const updateModeDesc = () => modeDesc.setText(
           S.indexMode === 'exclude'
@@ -4005,7 +4007,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       if (S.embeddingSource !== 'existing') {
         new Setting(body).setName('Index vault').setHeading();
 
-        const idxSection = body.createEl('div', { cls: 'll-action-section' });
+        const idxSection = body.createDiv({ cls: 'll-action-section' });
         idxSection.createEl('p', { cls: 'll-idx-desc',
           text: 'Embeddings help your device understand the meaning of your notes — not just keywords, but context and intent. ' +
                 'Index your vault before using the plugin. Notes that were added or heavily modified post-indexing will not appear or won\'t have a relevant similarity score.' });
@@ -4027,32 +4029,32 @@ class LinkLinkSettingTab extends PluginSettingTab {
           );
 
         const autoIdxHelpBtn = autoIdxSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-        const autoIdxTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
+        const autoIdxTip = activeDocument.body.createDiv({ cls: 'll-emb-tooltip ll-wide-tooltip' });
         this.autoIndexTipEl = autoIdxTip;
         const mkTipLines = (el: HTMLElement, lines: string[]) => {
           lines.forEach((line, i) => { if (i > 0) el.createEl('br'); el.appendText(line); });
         };
-        { const item = autoIdxTip.createEl('div', { cls: 'll-tip-item' });
-          item.createEl('div', { text: 'Only manually', cls: 'll-tip-title' });
-          mkTipLines(item.createEl('div', { cls: 'll-tip-body' }), [
+        { const item = autoIdxTip.createDiv({ cls: 'll-tip-item' });
+          item.createDiv({ text: 'Only manually', cls: 'll-tip-title' });
+          mkTipLines(item.createDiv({ cls: 'll-tip-body' }), [
             'You control when the indexer runs. No background activity.',
             '✦ Zero performance impact',
             '✦ Predictable — nothing runs unless you ask',
             '✗ Index might go stale in the background; new or edited notes won\'t appear in results until you re-index',
           ]); }
-        { const item = autoIdxTip.createEl('div', { cls: 'll-tip-item' });
-          const title = item.createEl('div', { cls: 'll-tip-title' });
+        { const item = autoIdxTip.createDiv({ cls: 'll-tip-item' });
+          const title = item.createDiv({ cls: 'll-tip-title' });
           title.appendText('On startup ');
-          title.createEl('span', { text: '(recommended)' }).setCssStyles({ fontWeight: '400', color: 'var(--text-muted)' });
-          mkTipLines(item.createEl('div', { cls: 'll-tip-body' }), [
+          title.createSpan({ text: '(recommended)' }).setCssStyles({ fontWeight: '400', color: 'var(--text-muted)' });
+          mkTipLines(item.createDiv({ cls: 'll-tip-body' }), [
             'Indexer runs once when Obsidian opens, then stays out of the way.',
             '✦ Index is always fresh at the start of each session',
             '✦ No impact during your work',
             '✗ Notes edited between sessions are stale until next restart or manual re-indexing',
           ]); }
-        { const item = autoIdxTip.createEl('div', { cls: 'll-tip-item' });
-          item.createEl('div', { text: 'On file save', cls: 'll-tip-title' });
-          mkTipLines(item.createEl('div', { cls: 'll-tip-body' }), [
+        { const item = autoIdxTip.createDiv({ cls: 'll-tip-item' });
+          item.createDiv({ text: 'On file save', cls: 'll-tip-title' });
+          mkTipLines(item.createDiv({ cls: 'll-tip-body' }), [
             'Indexes notes a few seconds after a file save.',
             '✦ Results stay continuously current',
             '✗ Light background processing after each save; may be noticeable on large vaults or slow machines',
@@ -4083,10 +4085,10 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
         // ? tooltip on the setting name (same pattern as Embedding model)
         const mtimeHelpBtn = mtimeSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-        const mtimeTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip' });
+        const mtimeTip = activeDocument.body.createDiv({ cls: 'll-emb-tooltip' });
         this.mtimeTipEl = mtimeTip;
-        { const item = mtimeTip.createEl('div', { cls: 'll-tip-item' });
-          const b = item.createEl('div', { cls: 'll-tip-body' });
+        { const item = mtimeTip.createDiv({ cls: 'll-tip-item' });
+          const b = item.createDiv({ cls: 'll-tip-body' });
           b.appendText('The index command compares a modification timestamp to skip unchanged notes.');
           b.createEl('br'); b.createEl('br');
           b.appendText('OS timestamp is the default signal, but keep in mind: sync tools such as Dropbox, iCloud, and others may overwrite it on transfer. If you have your modified timestamp stored in a custom frontmatter field, you can use it instead of the OS timestamp.');
@@ -4100,7 +4102,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         });
         mtimeHelpBtn.addEventListener('mouseleave', () => mtimeTip.classList.remove('visible'));
 
-        const fieldWrap = idxSection.createEl('div', { cls: 'll-mtime-field-wrap' });
+        const fieldWrap = idxSection.createDiv({ cls: 'll-mtime-field-wrap' });
         fieldWrap.setCssStyles({ display: S.mtimeSource === 'frontmatter' ? '' : 'none' });
 
         new Setting(fieldWrap)
@@ -4129,17 +4131,16 @@ class LinkLinkSettingTab extends PluginSettingTab {
           );
 
         const progDispHelpBtn = progDispSetting.nameEl.createEl('button', { cls: 'll-help-btn', text: '?' });
-        const progDispTip = activeDocument.body.createEl('div', { cls: 'll-emb-tooltip ll-wide-tooltip' });
+        const progDispTip = activeDocument.body.createDiv({ cls: 'll-emb-tooltip ll-wide-tooltip' });
         this.progressDisplayTipEl = progDispTip;
-        progDispTip.createEl('div', { cls: 'll-tip-item' })
-          .createEl('div', { text: 'Indexing a large vault can make Obsidian feel sluggish for a bit. Pick how you\'d like to follow along — or just let it run quietly in the background.', cls: 'll-tip-body' });
+        progDispTip.createDiv({ cls: 'll-tip-item' }).createDiv({ text: 'Indexing a large vault can make Obsidian feel sluggish for a bit. Pick how you\'d like to follow along — or just let it run quietly in the background.', cls: 'll-tip-body' });
         for (const [title, body] of [
           ['Pop-up window',                    'Completion summary stays open until you close it.'],
           ['Obsidian notifications & Silent',  'Show a brief completion summary for a few seconds.'],
         ] as [string, string][]) {
-          const item = progDispTip.createEl('div', { cls: 'll-tip-item' });
-          item.createEl('div', { text: title, cls: 'll-tip-title' });
-          item.createEl('div', { text: body,  cls: 'll-tip-body' });
+          const item = progDispTip.createDiv({ cls: 'll-tip-item' });
+          item.createDiv({ text: title, cls: 'll-tip-title' });
+          item.createDiv({ text: body,  cls: 'll-tip-body' });
         }
         progDispHelpBtn.addEventListener('mouseenter', () => {
           const r = progDispHelpBtn.getBoundingClientRect();
@@ -4154,14 +4155,14 @@ class LinkLinkSettingTab extends PluginSettingTab {
           'Pick 0 to disable timeout — notification stays until closed.',
           'notificationTimeout', 0, 10, 1);
 
-        idxSection.createEl('div', { cls: 'll-section-sep' });
-        const idxRow  = idxSection.createEl('div', { cls: 'll-idx-row' });
+        idxSection.createDiv({ cls: 'll-section-sep' });
+        const idxRow  = idxSection.createDiv({ cls: 'll-idx-row' });
         const idxBtn  = idxRow.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-        const idxIcon = idxBtn.createEl('span', { cls: 'll-btn-icon' });
+        const idxIcon = idxBtn.createSpan({ cls: 'll-btn-icon' });
         setIcon(idxIcon, 'database');
-        idxBtn.createEl('span', { text: 'Index vault' });
+        idxBtn.createSpan({ text: 'Index vault' });
 
-        const deleteSlot = idxRow.createEl('div');
+        const deleteSlot = idxRow.createDiv();
         const rebuildDeleteGroup = async () => {
           deleteSlot.empty();
           type IndexOpt = { value: string; label: string; path: string; canDelete: boolean };
@@ -4202,7 +4203,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
             });
           }
 
-          const group  = deleteSlot.createEl('div', { cls: 'll-idx-delete-group' });
+          const group  = deleteSlot.createDiv({ cls: 'll-idx-delete-group' });
           const sel    = group.createEl('select', { cls: 'll-idx-select' });
           const ph     = sel.createEl('option', { value: '', text: 'Select a saved index' });
           ph.disabled = true; ph.selected = true;
@@ -4213,8 +4214,8 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
           const delBtn = group.createEl('button', { cls: 'll-action-btn ll-action-btn-danger' });
           delBtn.disabled = true;
-          setIcon(delBtn.createEl('span', { cls: 'll-btn-icon' }), 'trash-2');
-          delBtn.createEl('span', { text: 'Delete' });
+          setIcon(delBtn.createSpan({ cls: 'll-btn-icon' }), 'trash-2');
+          delBtn.createSpan({ text: 'Delete' });
 
           sel.addEventListener('change', () => {
             delBtn.disabled = !(opts.find(x => x.value === sel.value)?.canDelete ?? false);
@@ -4238,7 +4239,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         ({ show: showProg, hide: hideProg } = makeProgress(idxSection));
 
         // Restore indexing defaults
-        body.createEl('div', { cls: 'll-restore-sep' });
+        body.createDiv({ cls: 'll-restore-sep' });
         new Setting(body)
           .setName('Restore indexing defaults')
           .setDesc('Reset all indexing settings to their defaults.')
@@ -4318,14 +4319,14 @@ class LinkLinkSettingTab extends PluginSettingTab {
     const renderInterlink = () => {
       new Setting(body).setName('Exceptions').setHeading();
 
-      filterSection(body.createEl('div', { cls: 'll-action-section ll-action-section-flat' }), app,
+      filterSection(body.createDiv({ cls: 'll-action-section ll-action-section-flat' }), app,
         'Completely ignored',
         'No read, no write, no references. These paths are invisible to the plugin.',
         S.ignoredPaths,
         async v => { S.ignoredPaths = v; await save(); }
       );
 
-      filterSection(body.createEl('div', { cls: 'll-action-section ll-action-section-flat' }), app,
+      filterSection(body.createDiv({ cls: 'll-action-section ll-action-section-flat' }), app,
         'Referenced, never written',
         'Can appear as related links in other notes, but the plugin will never modify these files.',
         S.readOnlyPaths,
@@ -4376,7 +4377,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           })());
         });
       const fieldErrEl = body.createEl('p', { cls: 'll-modal-error' }); fieldErrEl.setCssStyles({ display: 'none' });
-      const fieldConfirmRow = body.createEl('div', { cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
+      const fieldConfirmRow = body.createDiv({ cls: 'll-field-confirm-row' }); fieldConfirmRow.setCssStyles({ display: 'none' });
       fieldConfirmRow.createEl('button', { text: 'Cancel', cls: 'll-action-btn ll-action-btn-secondary' }).addEventListener('click', () => {
         const input = fieldSetting.controlEl.querySelector('input') as HTMLInputElement;
         if (input) input.value = lastValidRelatedField;
@@ -4391,26 +4392,26 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
       new Setting(body).setName('Run interlink').setHeading();
 
-      const ilSection = body.createEl('div', { cls: 'll-action-section' });
-      ilSection.createEl('div', { cls: 'll-interlink-lead',
+      const ilSection = body.createDiv({ cls: 'll-action-section' });
+      ilSection.createDiv({ cls: 'll-interlink-lead',
         text: 'Interlink Vault connects your notes with similar concepts and ideas.' });
-      ilSection.createEl('div', { cls: 'll-interlink-body',
+      ilSection.createDiv({ cls: 'll-interlink-body',
         text: 'It reads your vault\'s embeddings — a compact numerical representation of each note\'s content — ' +
               'and finds notes that are semantically similar to each other. When you run Interlink, it writes those ' +
               'connections into each note\'s frontmatter as native Obsidian [[links]], under the field you configure above.' });
-      ilSection.createEl('div', { cls: 'll-interlink-footer',
+      ilSection.createDiv({ cls: 'll-interlink-footer',
         text: 'Nothing leaves your machine — everything runs locally.' });
 
-      ilSection.createEl('div', { cls: 'll-section-sep' });
-      const ilRow = ilSection.createEl('div', { cls: 'll-il-btn-row' });
+      ilSection.createDiv({ cls: 'll-section-sep' });
+      const ilRow = ilSection.createDiv({ cls: 'll-il-btn-row' });
 
       const ilBtn = ilRow.createEl('button', { cls: 'll-action-btn ll-action-btn-accent' });
-      setIcon(ilBtn.createEl('span', { cls: 'll-btn-icon' }), 'git-branch');
-      ilBtn.createEl('span', { text: 'Interlink Vault' });
+      setIcon(ilBtn.createSpan({ cls: 'll-btn-icon' }), 'git-branch');
+      ilBtn.createSpan({ text: 'Interlink Vault' });
 
       const clearBtn = ilRow.createEl('button', { cls: 'll-action-btn ll-action-btn-danger' });
-      setIcon(clearBtn.createEl('span', { cls: 'll-btn-icon' }), 'eraser');
-      clearBtn.createEl('span', { text: 'Clear related field' });
+      setIcon(clearBtn.createSpan({ cls: 'll-btn-icon' }), 'eraser');
+      clearBtn.createSpan({ text: 'Clear related field' });
 
       const { show: showProg,      hide: hideProg      } = makeProgress(ilSection, INTERLINK_PHRASES);
       const { show: showClearProg, hide: hideClearProg } = makeProgress(ilSection, CLEAR_PHRASES);
@@ -4463,7 +4464,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         ).open();
       });
 
-      body.createEl('div', { cls: 'll-restore-sep' });
+      body.createDiv({ cls: 'll-restore-sep' });
       new Setting(body)
         .setName('Restore interlink defaults')
         .setDesc('Reset all interlink settings and exceptions to their defaults.')
@@ -4541,7 +4542,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       slider(body, 'Link force',    'Spring strength for linked notes.',                'linkStrength',   0,  1,  0.05);
       slider(body, 'Link distance', 'Inner ring rest distance.',                        'linkDistance',   1,  10, 0.5);
 
-      body.createEl('div', { cls: 'll-restore-sep' });
+      body.createDiv({ cls: 'll-restore-sep' });
       new Setting(body)
         .setName('Restore graph defaults')
         .setDesc('Reset all graph display and force settings to their defaults.')
@@ -4570,13 +4571,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
       new Setting(body).setName('Selection Mode').setHeading();
 
       // 2. How it works (collapsible spoiler)
-      const howBox    = body.createEl('div', { cls: 'll-how-box' });
-      const howHeader = howBox.createEl('div', { cls: 'll-how-header' });
-      const chevronEl = howHeader.createEl('span', { cls: 'll-how-chevron' });
+      const howBox    = body.createDiv({ cls: 'll-how-box' });
+      const howHeader = howBox.createDiv({ cls: 'll-how-header' });
+      const chevronEl = howHeader.createSpan({ cls: 'll-how-chevron' });
       setIcon(chevronEl, 'chevron-right');
-      howHeader.createEl('span', { text: 'How it works', cls: 'll-how-title' });
+      howHeader.createSpan({ text: 'How it works', cls: 'll-how-title' });
 
-      const howBody = howBox.createEl('div', { cls: 'll-how-body' });
+      const howBody = howBox.createDiv({ cls: 'll-how-body' });
 
       howBody.createEl('p', { text: 'Only works in Editor mode.', cls: 'll-how-editor-note' });
 
@@ -4598,7 +4599,6 @@ class LinkLinkSettingTab extends PluginSettingTab {
         setIcon(chevronEl, open ? 'chevron-down' : 'chevron-right');
       });
 
-      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
       let settingsWrap: HTMLElement;
       new Setting(body)
         .setName('Enable')
@@ -4612,12 +4612,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
         }));
 
       // 4. Settings wrap (appended after Enable toggle)
-      settingsWrap = body.createEl('div');
+      settingsWrap = body.createDiv();
       settingsWrap.setCssStyles({ display: S.selectionModeEnabled ? '' : 'none' });
 
       new Setting(settingsWrap).setName('Search parameters').setHeading();
 
-      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
       let ownParamsWrap: HTMLElement;
       new Setting(settingsWrap)
         .setName('Use Interlink search parameters')
@@ -4630,7 +4629,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           })();
         }));
 
-      ownParamsWrap = settingsWrap.createEl('div');
+      ownParamsWrap = settingsWrap.createDiv();
       ownParamsWrap.setCssStyles({ display: S.selectionUseMainParams ? 'none' : '' });
       slider(ownParamsWrap, 'Top N results',
         'How many similar notes to show in the panel. Lower = more focused, higher = more connections, 0 = show all.',
@@ -4642,13 +4641,13 @@ class LinkLinkSettingTab extends PluginSettingTab {
       // ── LIVE MODE ─────────────────────────────────────────────────────
       new Setting(body).setName('Live Mode').setHeading();
 
-      const liveHowBox    = body.createEl('div', { cls: 'll-how-box' });
-      const liveHowHeader = liveHowBox.createEl('div', { cls: 'll-how-header' });
-      const liveChevronEl = liveHowHeader.createEl('span', { cls: 'll-how-chevron' });
+      const liveHowBox    = body.createDiv({ cls: 'll-how-box' });
+      const liveHowHeader = liveHowBox.createDiv({ cls: 'll-how-header' });
+      const liveChevronEl = liveHowHeader.createSpan({ cls: 'll-how-chevron' });
       setIcon(liveChevronEl, 'chevron-right');
-      liveHowHeader.createEl('span', { text: 'How it works', cls: 'll-how-title' });
+      liveHowHeader.createSpan({ text: 'How it works', cls: 'll-how-title' });
 
-      const liveHowBody = liveHowBox.createEl('div', { cls: 'll-how-body' });
+      const liveHowBody = liveHowBox.createDiv({ cls: 'll-how-body' });
       liveHowBody.createEl('p', { text: 'Only works in Editor mode.', cls: 'll-how-editor-note' });
 
       const liveUl = liveHowBody.createEl('ul', { cls: 'll-how-list' });
@@ -4667,7 +4666,6 @@ class LinkLinkSettingTab extends PluginSettingTab {
         setIcon(liveChevronEl, open ? 'chevron-down' : 'chevron-right');
       });
 
-      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
       let liveSettingsWrap: HTMLElement;
       new Setting(body)
         .setName('Enable')
@@ -4680,12 +4678,11 @@ class LinkLinkSettingTab extends PluginSettingTab {
           })();
         }));
 
-      liveSettingsWrap = body.createEl('div');
+      liveSettingsWrap = body.createDiv();
       liveSettingsWrap.setCssStyles({ display: S.liveModeEnabled ? '' : 'none' });
 
       new Setting(liveSettingsWrap).setName('Search parameters').setHeading();
 
-      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
       let liveOwnParamsWrap: HTMLElement;
       new Setting(liveSettingsWrap)
         .setName('Use Interlink search parameters')
@@ -4698,7 +4695,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
           })();
         }));
 
-      liveOwnParamsWrap = liveSettingsWrap.createEl('div');
+      liveOwnParamsWrap = liveSettingsWrap.createDiv();
       liveOwnParamsWrap.setCssStyles({ display: S.liveModeUseMainParams ? 'none' : '' });
       slider(liveOwnParamsWrap, 'Top N results',
         'How many similar notes to show in the panel. Lower = more focused, higher = more connections, 0 = show all.',
@@ -4709,9 +4706,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
 
       new Setting(liveSettingsWrap).setName('Tracking').setHeading();
 
-      // eslint-disable-next-line prefer-const -- closures capture by reference before the assignment below
       let wordCountSetting: Setting;
-      // eslint-disable-next-line prefer-const -- closures capture by reference before the assignment below
       let wordCountWarning: HTMLElement;
       new Setting(liveSettingsWrap)
         .setName('Text window')
@@ -4750,7 +4745,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       });
       addReset(wordCountSetting, 'liveModeWordCount');
 
-      wordCountWarning = wordCountSetting.descEl.createEl('div', {
+      wordCountWarning = wordCountSetting.descEl.createDiv({
         text: 'Values below 5 aren\'t used — 5 will apply instead.',
         cls: 'll-setting-warn',
       });

@@ -225,6 +225,7 @@ export class IndexingService {
 
     if (val !== undefined && val !== null) {
       if (typeof val === 'number') return val;
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- frontmatter value is unknown-shaped user data; a non-date-like stringification simply fails Date.parse below and falls through to the OS mtime fallback
       const parsed = Date.parse(String(val));
       if (!isNaN(parsed)) return parsed;
     }
