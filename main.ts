@@ -1,5 +1,6 @@
 import {
   App,
+  Editor,
   FuzzySuggestModal,
   ItemView,
   MarkdownView,
@@ -82,6 +83,14 @@ interface LinkLinkSettings {
   selectionUseMainParams: boolean;
   selectionTopN: number;
   selectionThreshold: number;
+  // Live Mode
+  liveModeEnabled: boolean;
+  liveModeWindowType: 'paragraph' | 'words';
+  liveModeWordCount: number;
+  liveModeUpdateDelaySec: number;
+  liveModeUseMainParams: boolean;
+  liveModeTopN: number;
+  liveModeThreshold: number;
 }
 
 const DEFAULT_SETTINGS: LinkLinkSettings = {
@@ -121,6 +130,13 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   selectionUseMainParams: true,
   selectionTopN: 15,
   selectionThreshold: 0.5,
+  liveModeEnabled: true,
+  liveModeWindowType: 'paragraph',
+  liveModeWordCount: 100,
+  liveModeUpdateDelaySec: 1.5,
+  liveModeUseMainParams: true,
+  liveModeTopN: 15,
+  liveModeThreshold: 0.5,
 };
 
 
@@ -134,7 +150,7 @@ interface GNode {
   linked: boolean;
   isOutgoing: boolean; // outgoing link: body-text wiki link from current note to this node
   isBacklink: boolean; // this node's file links to the current note
-  isSelectionNode?: boolean;
+  textSearchOrigin?: 'manual' | 'live'; // set when this is the center node for an ad-hoc text search
 }
 
 interface GEdge { a: number; b: number; }
@@ -197,6 +213,53 @@ function contrastColor(hex: string): string {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? '#1a1a1a' : '#ffffff';
 }
 
+type IconPrimitive =
+  | { type: 'path'; d: string }
+  | { type: 'circle'; cx: number; cy: number; r: number }
+  | { type: 'line'; x1: number; y1: number; x2: number; y2: number };
+
+const iconPrimitiveCache = new Map<string, IconPrimitive[]>();
+
+// Extracts the real Lucide icon geometry Obsidian's setIcon() generates, so it
+// can be stroked onto a <canvas> — setIcon() only works on DOM elements, and
+// the graph's center node is a canvas. Builds the icon into a detached,
+// never-rendered <div> once and caches the result, since the graph's draw()
+// loop runs every animation frame and must not touch the DOM per-frame.
+function getIconPrimitives(name: string): IconPrimitive[] {
+  const cached = iconPrimitiveCache.get(name);
+  if (cached) return cached;
+
+  const tempEl = document.createElement('div');
+  setIcon(tempEl, name);
+  const svg = tempEl.querySelector('svg');
+  const primitives: IconPrimitive[] = [];
+  if (svg) {
+    for (const el of Array.from(svg.children)) {
+      if (el.tagName === 'path') {
+        const d = el.getAttribute('d');
+        if (d) primitives.push({ type: 'path', d });
+      } else if (el.tagName === 'circle') {
+        primitives.push({
+          type: 'circle',
+          cx: parseFloat(el.getAttribute('cx') ?? '0'),
+          cy: parseFloat(el.getAttribute('cy') ?? '0'),
+          r:  parseFloat(el.getAttribute('r')  ?? '0'),
+        });
+      } else if (el.tagName === 'line') {
+        primitives.push({
+          type: 'line',
+          x1: parseFloat(el.getAttribute('x1') ?? '0'),
+          y1: parseFloat(el.getAttribute('y1') ?? '0'),
+          x2: parseFloat(el.getAttribute('x2') ?? '0'),
+          y2: parseFloat(el.getAttribute('y2') ?? '0'),
+        });
+      }
+    }
+  }
+  iconPrimitiveCache.set(name, primitives);
+  return primitives;
+}
+
 // ─── Graph simulation ────────────────────────────────────────────────────────
 
 class GraphSimulation {
@@ -243,7 +306,7 @@ class GraphSimulation {
   private onToggleRelated: (file: TFile) => Promise<void>;
   private isHoveringCenter = false;
   private accentColor: string;
-  private selectionNode: { text: string; onClickCenter: () => void } | null = null;
+  private selectionNode: { text: string; origin: 'manual' | 'live'; onClickCenter: () => void } | null = null;
   private selectionTooltipEl: HTMLElement | null = null;
   private centerDragStart: { x: number; y: number } | null = null;
   private centerWarning: CenterWarningInfo | null = null;
@@ -259,7 +322,7 @@ class GraphSimulation {
     onInsertLink: (file: TFile, dropTarget: Element | null, dropX: number, dropY: number) => void,
     onContextMenu: (file: TFile, event: MouseEvent) => void,
     onToggleRelated: (file: TFile) => Promise<void>,
-    selectionNode?: { text: string; onClickCenter: () => void },
+    selectionNode?: { text: string; origin: 'manual' | 'live'; onClickCenter: () => void },
     centerWarning?: CenterWarningInfo
   ) {
     this.canvas          = canvas;
@@ -286,7 +349,7 @@ class GraphSimulation {
       file: currentFile, score: 1,
       x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0,
       pinned: true, linked: false, isOutgoing: false, isBacklink: false,
-      isSelectionNode: !!selectionNode,
+      textSearchOrigin: selectionNode?.origin,
     });
     for (let i = 0; i < results.length; i++) {
       const isLinked = linkedPaths.has(results[i].file.path);
@@ -705,7 +768,7 @@ class GraphSimulation {
     for (const n of nodes) {
       const r    = (n.pinned ? 11 : 8) * settings.nodeSizeMultiplier;
       const fill = n.pinned
-        ? (n.isSelectionNode ? '#3b82f6' : this.centerWarning ? WARNING_COLOR : settings.colorCenter)
+        ? (n.textSearchOrigin ? '#3b82f6' : this.centerWarning ? WARNING_COLOR : settings.colorCenter)
         : scoreToColor(n.score, settings, this.minScore, this.maxScore);
       if (n.pinned && this.isHoveringCenter) {
         ctx.beginPath(); ctx.arc(n.x, n.y, r + 6 / this.scale, 0, Math.PI * 2);
@@ -732,8 +795,11 @@ class GraphSimulation {
         ctx.beginPath(); ctx.arc(n.x, n.y + s * 0.48, barW * 0.8, 0, Math.PI * 2); ctx.fill();
       }
 
-      // Draw Lucide "quote" icon inside selection center node
-      if (n.pinned && n.isSelectionNode) {
+      // Draw an icon inside the ad-hoc text-search center node: Lucide "quote"
+      // for manual Selection Mode, the real "text-search" icon geometry for
+      // Live Mode — extracted from Obsidian's icon registry via getIconPrimitives()
+      // since canvas can't use setIcon() directly.
+      if (n.pinned && n.textSearchOrigin === 'manual') {
         ctx.save();
         ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.clip();
         const s = r / 20; // 0.6× of original r/12
@@ -742,6 +808,26 @@ class GraphSimulation {
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.fill(new Path2D('M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z'));
         ctx.fill(new Path2D('M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z'));
+        ctx.restore();
+      } else if (n.pinned && n.textSearchOrigin === 'live') {
+        ctx.save();
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.clip();
+        const s = r / 14; // Lucide icons use a 24×24 viewBox, roughly centered
+        ctx.translate(n.x - 12 * s, n.y - 12 * s);
+        ctx.scale(s, s);
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth   = 2 / (this.scale * s);
+        ctx.lineCap     = 'round';
+        ctx.lineJoin    = 'round';
+        for (const p of getIconPrimitives('text-search')) {
+          if (p.type === 'path') {
+            ctx.stroke(new Path2D(p.d));
+          } else if (p.type === 'circle') {
+            ctx.beginPath(); ctx.arc(p.cx, p.cy, p.r, 0, Math.PI * 2); ctx.stroke();
+          } else {
+            ctx.beginPath(); ctx.moveTo(p.x1, p.y1); ctx.lineTo(p.x2, p.y2); ctx.stroke();
+          }
+        }
         ctx.restore();
       }
 
@@ -760,7 +846,7 @@ class GraphSimulation {
       }
 
       if (textAlpha <= 0) continue;
-      if (n.pinned && n.isSelectionNode) continue; // no filename label for selection node
+      if (n.pinned && n.textSearchOrigin) continue; // no filename label for the ad-hoc search center node
       const name = n.file?.basename ?? '';
       if (!name) continue;
       const fs   = Math.max(7, Math.min(11, 9 / this.scale));
@@ -779,13 +865,14 @@ class GraphSimulation {
 
 // ─── View ────────────────────────────────────────────────────────────────────
 
-interface SelectionState {
+interface TextSearchState {
   text: string;
   sourceFile: TFile;
   sourceLine: number;
   firstWord: string;
   embedding: number[];
   results: ResultEntry[];
+  origin: 'manual' | 'live';
 }
 
 class LinkLinkView extends ItemView {
@@ -793,9 +880,13 @@ class LinkLinkView extends ItemView {
   private simulation: GraphSimulation | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private listUpdateFn: ((outgoingPaths: Set<string>, backlinkPaths: Set<string>) => void) | null = null;
-  private selectionState: SelectionState | null = null;
+  private textSearchState: TextSearchState | null = null;
   private selectionBtn: HTMLElement | null = null;
   private selectionChangeHandler: (() => void) | null = null;
+  private liveModeActive = false;
+  private liveModeBtn: HTMLElement | null = null;
+  private liveModeDebounceTimer: number | null = null;
+  private liveModeIdle = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: LinkLinkPlugin) {
     super(leaf); this.plugin = plugin;
@@ -806,7 +897,10 @@ class LinkLinkView extends ItemView {
   getIcon()        { return 'link'; }
 
   async onOpen() {
-    this.selectionChangeHandler = () => this.updateSelectionBtn();
+    this.selectionChangeHandler = () => {
+      this.updateSelectionBtn();
+      this.evaluateLiveMode();
+    };
     activeDocument.addEventListener('selectionchange', this.selectionChangeHandler);
     await this.refresh();
   }
@@ -816,8 +910,15 @@ class LinkLinkView extends ItemView {
       activeDocument.removeEventListener('selectionchange', this.selectionChangeHandler);
       this.selectionChangeHandler = null;
     }
-    this.selectionState = null;
+    if (this.liveModeDebounceTimer !== null) {
+      window.clearTimeout(this.liveModeDebounceTimer);
+      this.liveModeDebounceTimer = null;
+    }
+    this.textSearchState = null;
     this.selectionBtn   = null;
+    this.liveModeBtn    = null;
+    this.liveModeActive = false;
+    this.liveModeIdle   = false;
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.simulation?.stop();          this.simulation = null;
     this.listUpdateFn = null;
@@ -848,7 +949,7 @@ class LinkLinkView extends ItemView {
     const btn = this.selectionBtn;
     if (!btn) return;
     setIcon(btn, 'highlighter');
-    if (this.selectionState !== null) {
+    if (this.textSearchState?.origin === 'manual') {
       btn.addClass('ll-sel-icon-active');
       btn.removeClass('ll-sel-icon-dim');
     } else {
@@ -872,7 +973,7 @@ class LinkLinkView extends ItemView {
   }
 
   private getSelectionBtnTip(): { title: string; body: string } {
-    if (this.selectionState !== null) {
+    if (this.textSearchState?.origin === 'manual') {
       return { title: 'Selection Mode', body: 'Searching by selected text. Deselect text and click to return to note view.' };
     }
     const { text, wordCount } = this.getEditorSelection();
@@ -907,8 +1008,9 @@ class LinkLinkView extends ItemView {
     }
     const { text, valid, wordCount } = this.getEditorSelection();
     if (valid) {
+      this.deactivateLiveMode();
       await this.activateSelectionMode(text);
-    } else if (this.selectionState !== null) {
+    } else if (this.textSearchState?.origin === 'manual') {
       this.deactivateSelectionMode();
     } else if (text && wordCount > 0) {
       new Notice(`Select at least 5 words to use Selection Mode (${wordCount} word${wordCount === 1 ? '' : 's'} selected).`);
@@ -918,13 +1020,20 @@ class LinkLinkView extends ItemView {
   }
 
   private deactivateSelectionMode() {
-    this.selectionState = null;
+    this.textSearchState = null;
     void this.refresh();
   }
 
   private async activateSelectionMode(text: string) {
-    // Find the editor that owns the current DOM selection (activeEditor may be
-    // null because clicking the panel shifts focus away from the note).
+    const found = this.getFocusedEditor();
+    if (!found) { new Notice('No active note.'); return; }
+    await this.runAdHocSearch(text, found.file, found.editor.getCursor('from').line, 'manual');
+  }
+
+  // Finds the editor that owns the current DOM selection/caret (activeEditor
+  // may be null because clicking the panel shifts focus away from the note).
+  // Shared by manual Selection Mode activation and Live Mode's cursor tracker.
+  private getFocusedEditor(): { file: TFile; editor: Editor } | null {
     const sel    = window.getSelection();
     const anchor = sel?.anchorNode;
     const cmEl   = anchor
@@ -932,45 +1041,54 @@ class LinkLinkView extends ItemView {
           ? anchor.parentElement?.closest('.cm-editor')
           : (anchor as Element).closest?.('.cm-editor'))
       : null;
-
-    let sourceFile: TFile | null = null;
-    let sourceLine = 0;
-    if (cmEl) {
-      for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-        const view = leaf.view as MarkdownView;
-        if (view.containerEl.contains(cmEl as Node)) {
-          sourceFile = view.file ?? null;
-          sourceLine = view.editor.getCursor('from').line;
-          break;
-        }
+    if (!cmEl) return null;
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view as MarkdownView;
+      if (view.containerEl.contains(cmEl as Node) && view.file) {
+        return { file: view.file, editor: view.editor };
       }
     }
-    if (!sourceFile) { new Notice('No active note.'); return; }
-    const firstWord  = text.trim().split(/\s+/)[0] ?? '';
+    return null;
+  }
 
-    // Show loading state
-    this.simulation?.stop(); this.simulation = null;
-    this.resizeObserver?.disconnect(); this.resizeObserver = null;
-    this.listUpdateFn = null;
-    const el = this.contentEl;
-    el.empty(); el.addClass('ll-container');
-    const loadingEl = el.createEl('p', { text: 'Computing embedding…', cls: 'll-loading' });
+  // Shared embed → search → render pipeline for both manual Selection Mode
+  // and Live Mode. Manual activation shows a full-panel "Computing embedding…"
+  // loading state (a discrete, occasional user action); Live Mode computes
+  // quietly in the background so re-runs while typing don't flicker the panel.
+  private async runAdHocSearch(text: string, sourceFile: TFile, sourceLine: number, origin: 'manual' | 'live') {
+    const firstWord = text.trim().split(/\s+/)[0] ?? '';
 
-    const onProgress = (msg: string) => { loadingEl.setText(msg); };
+    let loadingEl: HTMLElement | null = null;
+    if (origin === 'manual') {
+      this.simulation?.stop(); this.simulation = null;
+      this.resizeObserver?.disconnect(); this.resizeObserver = null;
+      this.listUpdateFn = null;
+      const el = this.contentEl;
+      el.empty(); el.addClass('ll-container');
+      loadingEl = el.createEl('p', { text: 'Computing embedding…', cls: 'll-loading' });
+    }
+    const onProgress = (msg: string) => { loadingEl?.setText(msg); };
 
     try {
       const ready = await this.plugin.indexingService.ensureModel((msg) => onProgress(msg));
-      if (!ready) { void this.refresh(); return; }
+      if (!ready) { if (origin === 'manual') void this.refresh(); return; }
 
       const embedding = await this.plugin.indexingService.embed(text);
 
       let index: IndexEntry[];
       try { index = await this.plugin.loadAnyIndex(); }
-      catch { new Notice('No index found. Run Index Vault first.'); void this.refresh(); return; }
+      catch {
+        if (origin === 'manual') { new Notice('No index found. Run Index Vault first.'); void this.refresh(); }
+        return;
+      }
 
       const S = this.plugin.settings;
-      const threshold = S.selectionUseMainParams ? S.threshold : S.selectionThreshold;
-      const topN      = S.selectionUseMainParams ? S.topN      : S.selectionTopN;
+      const threshold = origin === 'live'
+        ? (S.liveModeUseMainParams ? S.threshold : S.liveModeThreshold)
+        : (S.selectionUseMainParams ? S.threshold : S.selectionThreshold);
+      const topN = origin === 'live'
+        ? (S.liveModeUseMainParams ? S.topN : S.liveModeTopN)
+        : (S.selectionUseMainParams ? S.topN : S.selectionTopN);
       const rawResults: { file: TFile; score: number }[] = [];
       for (const entry of index) {
         if (entry.path === sourceFile.path) continue; // exclude the note the text came from
@@ -979,42 +1097,213 @@ class LinkLinkView extends ItemView {
         const tf = this.app.vault.getFileByPath(entry.path);
         if (tf) rawResults.push({ file: tf, score: s });
       }
+      // Live Mode can be toggled off (or the immediate re-activation path can
+      // race with a debounced run) while embed()/loadAnyIndex() above were
+      // still in flight — discard a stale live result rather than resurrecting
+      // Live Mode's state after the user already turned it off.
+      if (origin === 'live' && !this.liveModeActive) return;
+
       rawResults.sort((a, b) => b.score - a.score);
       const trimmed = topN > 0 ? rawResults.slice(0, topN) : rawResults;
-      const results: ResultEntry[] = trimmed.map(r => ({ ...r, isOutgoing: false, isBacklink: false }));
+      // O/B markers relative to the note the tracked text came from — not the
+      // currently-open note, which may differ (e.g. browsing elsewhere while a
+      // manual selection stays frozen).
+      const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(sourceFile);
+      const results: ResultEntry[] = trimmed.map(r => ({
+        ...r,
+        isOutgoing: outgoingPaths.has(r.file.path),
+        isBacklink: backlinkPaths.has(r.file.path),
+      }));
 
-      this.selectionState = { text, sourceFile, sourceLine, firstWord, embedding, results };
+      this.liveModeIdle = false;
+      this.textSearchState = { text, sourceFile, sourceLine, firstWord, embedding, results, origin };
       this.renderSelectionModePanel();
     } catch (e) {
-      this.selectionState = null;
-      el.empty(); el.addClass('ll-container');
-      el.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
+      if (origin === 'manual') {
+        this.textSearchState = null;
+        const el = this.contentEl;
+        el.empty(); el.addClass('ll-container');
+        el.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
+      }
+      // Live Mode: swallow transient errors quietly and keep the last good
+      // state on screen — the next debounce cycle will retry automatically.
     }
   }
 
-  private renderSelectionModePanel() {
-    const state = this.selectionState!;
+  // ── Live Mode ─────────────────────────────────────────────────────────────
+
+  private extractParagraphAtCursor(editor: Editor): string {
+    const cursor = editor.getCursor();
+    let startLine = cursor.line, endLine = cursor.line;
+    while (startLine > 0 && editor.getLine(startLine - 1).trim() !== '') startLine--;
+    while (endLine < editor.lineCount() - 1 && editor.getLine(endLine + 1).trim() !== '') endLine++;
+    const lines: string[] = [];
+    for (let i = startLine; i <= endLine; i++) lines.push(editor.getLine(i));
+    return lines.join('\n').trim();
+  }
+
+  private extractLastNWords(editor: Editor, n: number): string {
+    const cursor     = editor.getCursor();
+    const textBefore = editor.getRange({ line: 0, ch: 0 }, cursor);
+    const words      = textBefore.trim().split(/\s+/).filter(w => w.length > 0);
+    return words.slice(-n).join(' ');
+  }
+
+  private getLiveModeWindowText(editor: Editor): string {
+    const S = this.plugin.settings;
+    return S.liveModeWindowType === 'words'
+      ? this.extractLastNWords(editor, Math.max(5, S.liveModeWordCount))
+      : this.extractParagraphAtCursor(editor);
+  }
+
+  private getLiveModeBtnTip(): { title: string; body: string } {
+    if (this.liveModeActive) {
+      return { title: 'Live Mode', body: 'Tracking your current paragraph (or last N words) as you write. Click to return to note view.' };
+    }
+    return { title: 'Live Mode', body: 'Click to automatically show notes related to what you\'re currently writing.' };
+  }
+
+  private updateLiveModeBtn() {
+    const btn = this.liveModeBtn;
+    if (!btn) return;
+    setIcon(btn, 'text-search');
+    btn.toggleClass('ll-sel-icon-active', this.liveModeActive);
+  }
+
+  private createLiveModeBtn(parent: HTMLElement): HTMLElement {
+    const btn = parent.createEl('div', { cls: 'll-icon-btn ll-sel-icon-btn' });
+    this.liveModeBtn = btn;
+    this.updateLiveModeBtn();
+    let hideTip: (() => void) | null = null;
+    btn.addEventListener('mouseenter', () => {
+      hideTip?.();
+      const { title, body } = this.getLiveModeBtnTip();
+      hideTip = showListTip(btn, title, body, 'right');
+    });
+    btn.addEventListener('mouseleave', () => { hideTip?.(); hideTip = null; });
+    btn.addEventListener('click', () => { hideTip?.(); hideTip = null; this.handleLiveModeBtnClick(); });
+    return btn;
+  }
+
+  private handleLiveModeBtnClick() {
+    if (this.plugin.settings.embeddingSource === 'existing') {
+      new Notice('Live Mode requires Built-in or Ollama embedding. Switch in Settings → Embedding.');
+      return;
+    }
+    if (this.liveModeActive) {
+      this.deactivateLiveMode();
+      void this.refresh();
+      return;
+    }
+    if (this.textSearchState?.origin === 'manual') this.textSearchState = null;
+    this.liveModeActive = true;
+    this.updateLiveModeBtn(); // light up the button immediately, before the (possibly async) render
+    this.evaluateLiveMode(true);
+  }
+
+  private deactivateLiveMode() {
+    this.liveModeActive = false;
+    this.liveModeIdle   = false;
+    if (this.liveModeDebounceTimer !== null) {
+      window.clearTimeout(this.liveModeDebounceTimer);
+      this.liveModeDebounceTimer = null;
+    }
+    if (this.textSearchState?.origin === 'live') this.textSearchState = null;
+  }
+
+  private renderLiveModeIdle() {
     this.simulation?.stop(); this.simulation = null;
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.listUpdateFn = null;
     this.selectionBtn = null;
+    this.liveModeBtn  = null;
+    this.liveModeIdle = true;
+
+    const el = this.contentEl;
+    el.empty(); el.addClass('ll-container');
+
+    const header = el.createEl('div', { cls: 'll-header' });
+    header.createEl('span', { text: '[Live mode]', cls: 'll-title' });
+    const controls = header.createEl('div', { cls: 'll-controls' });
+    if (this.plugin.settings.selectionModeEnabled) {
+      this.createSelectionBtn(controls);
+      this.updateSelectionBtn();
+    }
+    this.createLiveModeBtn(controls);
+
+    el.createEl('p', { text: 'Write at least 5 words to see related notes.', cls: 'll-live-idle' });
+  }
+
+  // Re-evaluates the tracked text window and (re)schedules the debounced
+  // search. Called on every selectionchange event while Live Mode is active
+  // (cheap unless the window text actually changed) and once immediately
+  // (`immediate = true`) when the mode is switched on or the active leaf
+  // changes, for instant feedback instead of waiting out the debounce.
+  evaluateLiveMode(immediate = false) {
+    if (!this.liveModeActive) return;
+    const found = this.getFocusedEditor();
+    if (!found) {
+      if (immediate) { this.textSearchState = null; this.renderLiveModeIdle(); }
+      return;
+    }
+
+    const { editor, file } = found;
+    const text  = this.getLiveModeWindowText(editor);
+    const words = text.split(/\s+/).filter(w => w.length > 0);
+
+    if (words.length < 5) {
+      if (this.liveModeDebounceTimer !== null) {
+        window.clearTimeout(this.liveModeDebounceTimer);
+        this.liveModeDebounceTimer = null;
+      }
+      if (!this.liveModeIdle || immediate) { this.textSearchState = null; this.renderLiveModeIdle(); }
+      return;
+    }
+
+    if (!immediate && this.textSearchState?.origin === 'live' && this.textSearchState.text === text) return;
+
+    if (this.liveModeDebounceTimer !== null) window.clearTimeout(this.liveModeDebounceTimer);
+    const sourceLine = editor.getCursor('from').line;
+    if (immediate) {
+      this.liveModeDebounceTimer = null;
+      void this.runAdHocSearch(text, file, sourceLine, 'live');
+    } else {
+      this.liveModeDebounceTimer = window.setTimeout(() => {
+        this.liveModeDebounceTimer = null;
+        void this.runAdHocSearch(text, file, sourceLine, 'live');
+      }, this.plugin.settings.liveModeUpdateDelaySec * 1000);
+    }
+  }
+
+  private renderSelectionModePanel() {
+    const state = this.textSearchState!;
+    this.simulation?.stop(); this.simulation = null;
+    this.resizeObserver?.disconnect(); this.resizeObserver = null;
+    this.listUpdateFn = null;
+    this.selectionBtn = null;
+    this.liveModeBtn  = null;
 
     const el = this.contentEl;
     el.empty(); el.addClass('ll-container');
 
     const isGraph = this.plugin.settings.viewMode === 'graph';
 
-    // First header row (no interlink button in selection mode)
+    // First header row (no interlink button in selection/live mode)
     const header = el.createEl('div', { cls: 'll-header' });
 
-    header.createEl('span', { text: '[Selection mode]', cls: 'll-title' });
+    header.createEl('span', { text: state.origin === 'live' ? '[Live mode]' : '[Selection mode]', cls: 'll-title' });
     const controls = header.createEl('div', { cls: 'll-controls' });
 
-    // Selection button (state 4: accent color) — left of view toggle, no refresh button
-    this.createSelectionBtn(controls);
-    this.updateSelectionBtn(); // sets accent color since selectionState !== null
+    // Mode buttons (active one shown in accent color) — left of view toggle, no refresh button
+    if (this.plugin.settings.selectionModeEnabled) {
+      this.createSelectionBtn(controls);
+      this.updateSelectionBtn(); // sets accent color since textSearchState.origin === 'manual'
+    }
+    if (this.plugin.settings.liveModeEnabled) {
+      this.createLiveModeBtn(controls);
+    }
 
-    // View toggle (no refresh button in selection mode)
+    // View toggle (no refresh button in selection/live mode)
     const toggle = controls.createEl('div', {
       cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
       title: isGraph ? 'Switch to list' : 'Switch to graph',
@@ -1036,7 +1325,11 @@ class LinkLinkView extends ItemView {
   }
 
   async refresh() {
-    if (this.selectionState !== null) return; // hold on selection results
+    // Hold on selection/live results — liveModeActive alone (not just textSearchState)
+    // must block this, since Live Mode's idle "not enough text" state clears
+    // textSearchState but should still own the panel, not get clobbered by an
+    // unrelated refresh() call (e.g. an auto-index completing in the background).
+    if (this.textSearchState !== null || this.liveModeActive) return;
 
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.simulation?.stop();          this.simulation = null;
@@ -1094,10 +1387,13 @@ class LinkLinkView extends ItemView {
       header.createEl('span', { text: activeFile.basename, cls: 'll-title' });
       const controls = header.createEl('div', { cls: 'll-controls' });
 
-      // Selection mode button — left of refresh button
+      // Mode buttons — left of refresh button
       if (this.plugin.settings.selectionModeEnabled) {
         this.createSelectionBtn(controls);
         this.updateSelectionBtn();
+      }
+      if (this.plugin.settings.liveModeEnabled) {
+        this.createLiveModeBtn(controls);
       }
 
       this.mkIconBtn(controls, 'refresh-cw', 'Update panel',
@@ -1163,6 +1459,9 @@ class LinkLinkView extends ItemView {
     if (this.plugin.settings.selectionModeEnabled) {
       this.createSelectionBtn(controls);
       this.updateSelectionBtn();
+    }
+    if (this.plugin.settings.liveModeEnabled) {
+      this.createLiveModeBtn(controls);
     }
 
     const isGraph = this.plugin.settings.viewMode === 'graph';
@@ -1248,7 +1547,11 @@ class LinkLinkView extends ItemView {
   }
 
   updateBadges(activeFile: TFile) {
-    const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(activeFile);
+    // While a manual/live text search is driving the panel, O/B markers are
+    // relative to that search's source note, not whatever note happens to be
+    // open right now.
+    const refFile = this.textSearchState?.sourceFile ?? activeFile;
+    const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(refFile);
     this.listUpdateFn?.(outgoingPaths, backlinkPaths);
     if (this.simulation) {
       const flags = new Map<string, { isOutgoing: boolean; isBacklink: boolean }>();
@@ -1322,19 +1625,19 @@ class LinkLinkView extends ItemView {
     const maxScore = scores.length > 0 ? Math.max(...scores) : 1;
     const field = this.plugin.settings.relatedFieldName || 'related';
 
-    // Selection mode entry at top of list
-    if (this.selectionState !== null) {
-      const state    = this.selectionState;
+    // Selection/Live mode entry at top of list
+    if (this.textSearchState !== null) {
+      const state    = this.textSearchState;
       const entry    = list.createEl('div', { cls: 'll-sel-entry expanded' });
       let expanded   = true;
       const iconEl   = entry.createEl('span', { cls: 'll-sel-entry-icon' });
-      setIcon(iconEl, 'highlighter');
+      setIcon(iconEl, state.origin === 'live' ? 'text-search' : 'highlighter');
       entry.createEl('span', { text: state.sourceFile.basename, cls: 'll-sel-entry-source' });
       const previewEl = entry.createEl('span', { cls: 'll-sel-entry-preview' });
       const preview   = state.text.length > 120 ? state.text.slice(0, 120) + '…' : state.text;
       previewEl.setText(preview);
       let hideSelTip: (() => void) | null = null;
-      entry.addEventListener('mouseenter', () => { hideSelTip = showListTip(entry, 'Click to open Text Popup', 'Shows the full selected text'); });
+      entry.addEventListener('mouseenter', () => { hideSelTip = showListTip(entry, 'Click to open Text Popup', state.origin === 'live' ? 'Shows the full tracked text' : 'Shows the full selected text'); });
       entry.addEventListener('mouseleave', () => { hideSelTip?.(); hideSelTip = null; });
       entry.addEventListener('click', () => {
         hideSelTip?.(); hideSelTip = null;
@@ -1540,8 +1843,12 @@ class LinkLinkView extends ItemView {
     const canvas = wrap.createEl('canvas', { cls: 'll-graph' });
     const linked = this.plugin.getLinkedPaths(currentFile, results);
 
-    const selInfo = this.selectionState
-      ? { text: this.selectionState.text, onClickCenter: () => new SelectionTextPopup(this.app, this.selectionState!).open() }
+    const selInfo = this.textSearchState
+      ? {
+          text: this.textSearchState.text,
+          origin: this.textSearchState.origin,
+          onClickCenter: () => new SelectionTextPopup(this.app, this.textSearchState!).open(),
+        }
       : undefined;
 
     this.simulation = new GraphSimulation(
@@ -1718,9 +2025,9 @@ const INTERLINK_PHRASES = [
 // ─── Selection Text Popup ─────────────────────────────────────────────────────
 
 class SelectionTextPopup extends Modal {
-  private state: SelectionState;
+  private state: TextSearchState;
 
-  constructor(app: App, state: SelectionState) {
+  constructor(app: App, state: TextSearchState) {
     super(app);
     this.state = state;
   }
@@ -1734,7 +2041,7 @@ class SelectionTextPopup extends Modal {
     contentEl.empty();
     this.modalEl.addClass('ll-sel-popup');
 
-    contentEl.createEl('div', { text: 'Selected text', cls: 'll-sel-popup-title' });
+    contentEl.createEl('div', { text: this.state.origin === 'live' ? 'Tracked text' : 'Selected text', cls: 'll-sel-popup-title' });
     contentEl.createEl('div', { cls: 'll-sel-popup-sep' });
 
     const textEl = contentEl.createEl('div', { cls: 'll-sel-popup-text' });
@@ -2024,6 +2331,7 @@ export default class LinkLinkPlugin extends Plugin {
       // that refresh so the simulation stays alive and first click works.
       if (leaf?.view instanceof LinkLinkView) return;
       this.refreshView();
+      this.notifyPossibleEditorChange();
     }));
 
     // Real-time badge updates: when a file's metadata changes, update O/B badges
@@ -2111,6 +2419,14 @@ export default class LinkLinkPlugin extends Plugin {
   refreshView() {
     const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
     if (leaf?.view instanceof LinkLinkView) void leaf.view.refresh();
+  }
+
+  // Re-targets Live Mode to whichever note/editor now has focus after a leaf
+  // switch. selectionchange alone usually covers this too, but a leaf switch
+  // doesn't always fire a DOM selection event on the same tick.
+  notifyPossibleEditorChange() {
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (leaf?.view instanceof LinkLinkView) leaf.view.evaluateLiveMode(true);
   }
 
   updateViewBadges(file: TFile) {
@@ -3262,7 +3578,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       ['embedding', 'Embedding'],
       ['interlink', 'Interlink Vault'],
       ['graph',     'Graph'],
-      ['selection', 'Selection Mode'],
+      ['selection', 'Additional modes'],
     ] as const) {
       const btn = tabBar.createEl('button', {
         cls: 'll-tab' + (id === 'embedding' ? ' active' : ''),
@@ -4247,7 +4563,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         });
     };
 
-    // ── SELECTION MODE TAB ───────────────────────────────────────────────
+    // ── ADDITIONAL MODES TAB (Selection Mode, Live Mode) ────────────────
 
     const renderSelectionSettings = () => {
       // 1. Heading
@@ -4276,6 +4592,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
       addDesc('Selection entry (list view):', 'A collapsible card at the top shows the source note and a preview of the selected text. Click it to open the Selection Text Popup.');
       addDesc('Selection node (graph view):', 'Click the center node to open the Selection Text Popup.');
       addDesc('Selection Text Popup:', 'Shows the full selected text (selectable, with a Copy button) and a Find button that opens the original passage.');
+      addDesc('Minimum length:', 'Requires at least 5 words in the selected text to perform effective semantic search.');
       howHeader.addEventListener('click', () => {
         const open = howBody.classList.toggle('ll-how-body-open');
         setIcon(chevronEl, open ? 'chevron-down' : 'chevron-right');
@@ -4321,6 +4638,129 @@ class LinkLinkSettingTab extends PluginSettingTab {
       slider(ownParamsWrap, 'Similarity threshold',
         'How alike notes must be to count as related. 0 = any note qualifies, 1 = only near-identical notes. Around 0.5 is a good starting point.',
         'selectionThreshold', 0, 1, 0.05);
+
+      // ── LIVE MODE ─────────────────────────────────────────────────────
+      new Setting(body).setName('Live Mode').setHeading();
+
+      const liveHowBox    = body.createEl('div', { cls: 'll-how-box' });
+      const liveHowHeader = liveHowBox.createEl('div', { cls: 'll-how-header' });
+      const liveChevronEl = liveHowHeader.createEl('span', { cls: 'll-how-chevron' });
+      setIcon(liveChevronEl, 'chevron-right');
+      liveHowHeader.createEl('span', { text: 'How it works', cls: 'll-how-title' });
+
+      const liveHowBody = liveHowBox.createEl('div', { cls: 'll-how-body' });
+      liveHowBody.createEl('p', { text: 'Only works in Editor mode.', cls: 'll-how-editor-note' });
+
+      const liveUl = liveHowBody.createEl('ul', { cls: 'll-how-list' });
+      liveUl.createEl('li', { text: 'Tracks either your current paragraph or the last N words before the cursor, and re-embeds it automatically a short pause after you stop typing.' });
+
+      const addLiveDesc = (label: string, desc: string) => {
+        const p = liveHowBody.createEl('p', { cls: 'll-how-desc' });
+        p.createEl('strong', { text: label });
+        p.appendText(' ' + desc);
+      };
+      addLiveDesc('Live entry (list view):', 'A collapsible card at the top shows the source note and a preview of the tracked text. Click it to open the Tracked Text Popup.');
+      addLiveDesc('Live node (graph view):', 'Click the center node to open the Tracked Text Popup.');
+      addLiveDesc('Minimum length:', 'Requires at least 5 words in the tracked text to perform effective semantic search.');
+      liveHowHeader.addEventListener('click', () => {
+        const open = liveHowBody.classList.toggle('ll-how-body-open');
+        setIcon(liveChevronEl, open ? 'chevron-down' : 'chevron-right');
+      });
+
+      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
+      let liveSettingsWrap: HTMLElement;
+      new Setting(body)
+        .setName('Enable')
+        .setDesc('Shows a text-search button in the panel header. Only works in Obsidian Editor mode (source editing view — not reading mode).')
+        .addToggle(t => t.setValue(S.liveModeEnabled).onChange(v => {
+          void (async () => {
+            S.liveModeEnabled = v;
+            await save();
+            liveSettingsWrap.setCssStyles({ display: v ? '' : 'none' });
+          })();
+        }));
+
+      liveSettingsWrap = body.createEl('div');
+      liveSettingsWrap.setCssStyles({ display: S.liveModeEnabled ? '' : 'none' });
+
+      new Setting(liveSettingsWrap).setName('Search parameters').setHeading();
+
+      // eslint-disable-next-line prefer-const -- closure in addToggle captures by reference before the assignment below
+      let liveOwnParamsWrap: HTMLElement;
+      new Setting(liveSettingsWrap)
+        .setName('Use Interlink search parameters')
+        .setDesc('When on, uses the same Top N and Similarity threshold as Interlink Vault. Turn off to set separate values.')
+        .addToggle(t => t.setValue(S.liveModeUseMainParams).onChange(v => {
+          void (async () => {
+            S.liveModeUseMainParams = v;
+            await save();
+            liveOwnParamsWrap.setCssStyles({ display: v ? 'none' : '' });
+          })();
+        }));
+
+      liveOwnParamsWrap = liveSettingsWrap.createEl('div');
+      liveOwnParamsWrap.setCssStyles({ display: S.liveModeUseMainParams ? 'none' : '' });
+      slider(liveOwnParamsWrap, 'Top N results',
+        'How many similar notes to show in the panel. Lower = more focused, higher = more connections, 0 = show all.',
+        'liveModeTopN', 0, 100, 5);
+      slider(liveOwnParamsWrap, 'Similarity threshold',
+        'How alike notes must be to count as related. 0 = any note qualifies, 1 = only near-identical notes. Around 0.5 is a good starting point.',
+        'liveModeThreshold', 0, 1, 0.05);
+
+      new Setting(liveSettingsWrap).setName('Tracking').setHeading();
+
+      // eslint-disable-next-line prefer-const -- closures capture by reference before the assignment below
+      let wordCountSetting: Setting;
+      // eslint-disable-next-line prefer-const -- closures capture by reference before the assignment below
+      let wordCountWarning: HTMLElement;
+      new Setting(liveSettingsWrap)
+        .setName('Text window')
+        .setDesc('What to track as you write.')
+        .addDropdown(d => d
+          .addOptions({ paragraph: 'Current paragraph', words: 'Last N words' })
+          .setValue(S.liveModeWindowType)
+          .onChange(v => { void (async () => {
+            S.liveModeWindowType = v as LinkLinkSettings['liveModeWindowType'];
+            await save();
+            const showWords = v === 'words';
+            wordCountSetting.settingEl.setCssStyles({ display: showWords ? '' : 'none' });
+            if (!showWords) wordCountWarning.setCssStyles({ display: 'none' });
+          })(); })
+        );
+
+      wordCountSetting = new Setting(liveSettingsWrap)
+        .setName('Word count (N)')
+        .setDesc(createFragment(frag => {
+          frag.appendText('Minimum 5 words.');
+          frag.createEl('br');
+          frag.appendText('Shorter windows produce unreliable embeddings.');
+          frag.createEl('br');
+          frag.appendText('There\'s no enforced maximum; larger values mean each update embeds more text, which takes longer and may match less precisely.');
+        }));
+      wordCountSetting.addText(t => {
+        t.inputEl.type = 'number';
+        t.inputEl.min  = '5';
+        t.setValue(String(S.liveModeWordCount));
+        t.onChange(v => { void (async () => {
+          const n = parseInt(v, 10);
+          wordCountWarning.setCssStyles({ display: Number.isFinite(n) && n < 5 ? '' : 'none' });
+          S.liveModeWordCount = Number.isFinite(n) ? Math.max(5, n) : DEFAULT_SETTINGS.liveModeWordCount;
+          await save();
+        })(); });
+      });
+      addReset(wordCountSetting, 'liveModeWordCount');
+
+      wordCountWarning = wordCountSetting.descEl.createEl('div', {
+        text: 'Values below 5 aren\'t used — 5 will apply instead.',
+        cls: 'll-setting-warn',
+      });
+      wordCountWarning.setCssStyles({ display: 'none' });
+
+      wordCountSetting.settingEl.setCssStyles({ display: S.liveModeWindowType === 'words' ? '' : 'none' });
+
+      slider(liveSettingsWrap, 'Update delay (seconds)',
+        'How long to wait after you stop typing before re-running the search.',
+        'liveModeUpdateDelaySec', 0.5, 5, 0.5);
     };
 
     switchTab('embedding');

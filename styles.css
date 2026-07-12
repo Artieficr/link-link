@@ -297,13 +297,20 @@
 
 .ll-empty,
 .ll-loading,
-.ll-error {
+.ll-error,
+.ll-live-idle {
   color: var(--text-muted);
   font-size: 0.85em;
   padding: 12px 8px;
 }
 
 .ll-error { color: var(--text-error); }
+
+.ll-setting-warn {
+  color: var(--text-error);
+  font-size: 0.85em;
+  margin: 4px 0 0;
+}
 
 .ll-emb-error { padding: 8px; }
 .ll-error-hint { color: var(--text-muted); font-size: 0.85em; margin-top: 4px; }

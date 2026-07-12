@@ -25,6 +25,7 @@ Same amount of notes on examples below. More semantic connections between relate
 - **Interlink Current Note** — writes a `related:` frontmatter field to the currently open note only, connecting it to its most semantically similar notes. Available as a panel button and a command palette entry.
 - **Interlink Vault** — performs semantic search across the entire index, finds the top N similar notes for each one, and populates a `related:` field with native Obsidian `[[links]]`. That way every note finds its connections with other notes that share similar concepts and ideas, even if they were never connected manually. Available as a command palette entry.
 - **Selection Mode** — run a semantic search on any selected text passage: select 5 or more words in any note, click the button, and the panel switches to showing notes semantically related only to that passage.
+- **Live Mode** — tracks either your current paragraph or the last N words before the cursor, and re-embeds it automatically a short pause after you stop typing. The panel switches to showing notes semantically related only to that segment.
 - **Commands** — all major actions are available from the command palette:
     - _Open related notes panel_
     - _Index Vault_
@@ -75,13 +76,14 @@ All features on the list view have a tooltip with a description of what this is,
 
 1. **Interlink current note** — updates your frontmatter `related:` field with semantically similar notes from the index file.
 2. **Selection mode** — runs a semantic search on any selected text passage: select 5 or more words in any note, click the button, and the panel switches to showing notes semantically related only to that passage.
-3. **Update panel** — side panel should update in a real time, but in case it would not pick up your recent action, you can force update it right now.
-4. **Switch display mode** — hop from list view to graph back and forth with this toggle.
-5. **Similarity score** — the closer the value is to 1, the more similar this note is to your current note.
-6. **`B` badge** — B stands for Backlink. Notes in the list with this badge have current note referenced in them.
-7. **`O` badge** — O stands for Outgoing links. Notes in the list with this badge are referenced in the current note's text.
-8. **Remove from `related:`** — removes this note from current note's `related:` frontmatter field. Basically removes a connection. Keep in mind that a note can still be connected if it has `B` or `O` badges.
-9. **Add to `related:`** — add this note to current note's `related:` frontmatter field. Basically creates a connection.
+3. **Live Mode** — tracks either your current paragraph or the last N words before the cursor, and re-embeds it automatically a short pause after you stop typing. The panel switches to showing notes semantically related only to that segment.
+4. **Update panel** — side panel should update in a real time, but in case it would not pick up your recent action, you can force update it right now.
+5. **Switch display mode** — hop from list view to graph back and forth with this toggle.
+6. **Similarity score** — the closer the value is to 1, the more similar this note is to your current note.
+7. **`B` badge** — B stands for Backlink. Notes in the list with this badge have current note referenced in them.
+8. **`O` badge** — O stands for Outgoing links. Notes in the list with this badge are referenced in the current note's text.
+9. **Remove from `related:`** — removes this note from current note's `related:` frontmatter field. Basically removes a connection. Keep in mind that a note can still be connected if it has `B` or `O` badges.
+10. **Add to `related:`** — add this note to current note's `related:` frontmatter field. Basically creates a connection.
 
 Notes with `B` or `O` badges are already connected to current note in their way. That's why their `Add` button is transparent — so unconnected notes stand out.
 
