@@ -111,8 +111,13 @@ ONLY `related:` FIELD IS MODIFIED. Other notes' content stays untouched.
 
 ## Privacy
 
-Everything runs on your machine. No notes, embeddings, or metadata are ever sent anywhere.
-The built-in model downloads once on first index (~25 MB) and is cached locally — after that, no network connection is ever required, plugin runs fully offline.
+Everything runs on your machine. No notes, embeddings, or metadata are ever sent anywhere. The only network activity, by embedding source:
+
+- **Built-in (default):** on first index, downloads the model (~25 MB, from [Hugging Face](https://huggingface.co/Xenova/bge-small-en-v1.5)) and the ONNX WASM runtime (from the jsDelivr CDN). Both are cached locally after that — no network connection is needed again, the plugin runs fully offline.
+- **Local model (Ollama):** sends requests only to the Ollama server URL you configure (`http://localhost:11434` by default) — never leaves your machine.
+- **Existing index file:** reads a file already inside your vault. No network activity at all.
+
+No file system access outside your vault.
 
 ## Contributing
 I'm not a software engineer — I created this plugin for myself with the help of [Claude Code](https://claude.com/product/claude-code).

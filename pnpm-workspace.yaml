@@ -4,4 +4,7 @@ allowBuilds:
   sharp: false
 
 overrides:
-  protobufjs: ^7.4.0
+  # >=7.6.3 excludes CVE-2026-54269 (GHSA-f38q-mgvj-vph7) while staying on
+  # the 7.x line onnx-proto/onnxruntime-web expect — 8.x has its own
+  # vulnerable range (<=8.5.0) and risks breaking their 6.x/7.x-shaped API.
+  protobufjs: ^7.6.3
