@@ -1,6 +1,6 @@
 {
   "name": "link-link",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "`Link Link!` finds semantically similar notes and shows them in a live side panel, ranked by relevance. Click to open, drag into the editor to paste a [[link]], or batch-connect your entire vault in one command.",
   "main": "main.js",
   "scripts": {
