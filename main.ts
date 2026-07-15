@@ -879,6 +879,15 @@ class LinkLinkView extends ItemView {
   plugin: LinkLinkPlugin;
   private simulation: GraphSimulation | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  // Bumped whenever any render path takes ownership of contentEl (empties and
+  // repaints it) — refresh(), the selection/live panels, the ad-hoc search
+  // loading state. refresh() captures the value at its start and bails after
+  // each await (and before painting in its catch) if it changed, instead of
+  // appending a second header/canvas under content another path already
+  // painted — e.g. when several active-leaf-change events fire in quick
+  // succession while Obsidian restores the workspace layout on startup and
+  // one of them throws EmbeddingNotFoundError mid-flight.
+  private renderId = 0;
   private listUpdateFn: ((outgoingPaths: Set<string>, backlinkPaths: Set<string>) => void) | null = null;
   private textSearchState: TextSearchState | null = null;
   private selectionBtn: HTMLElement | null = null;
@@ -1059,10 +1068,12 @@ class LinkLinkView extends ItemView {
     const firstWord = text.trim().split(/\s+/)[0] ?? '';
 
     let loadingEl: HTMLElement | null = null;
+    let myRenderId = this.renderId;
     if (origin === 'manual') {
       this.simulation?.stop(); this.simulation = null;
       this.resizeObserver?.disconnect(); this.resizeObserver = null;
       this.listUpdateFn = null;
+      myRenderId = ++this.renderId; // take ownership of contentEl so in-flight refresh() continuations bail
       const el = this.contentEl;
       el.empty(); el.addClass('ll-container');
       loadingEl = el.createEl('p', { text: 'Computing embedding…', cls: 'll-loading' });
@@ -1121,6 +1132,9 @@ class LinkLinkView extends ItemView {
     } catch (e) {
       if (origin === 'manual') {
         this.textSearchState = null;
+        // Skip the stale error paint if another render took over the panel
+        // while embed()/loadAnyIndex() were in flight.
+        if (myRenderId !== this.renderId) return;
         const el = this.contentEl;
         el.empty(); el.addClass('ll-container');
         el.createEl('p', { text: `Error: ${e instanceof Error ? e.message : String(e)}`, cls: 'll-error' });
@@ -1212,6 +1226,7 @@ class LinkLinkView extends ItemView {
   }
 
   private renderLiveModeIdle() {
+    this.renderId++; // take ownership of contentEl so in-flight refresh() continuations bail
     this.simulation?.stop(); this.simulation = null;
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.listUpdateFn = null;
@@ -1277,6 +1292,7 @@ class LinkLinkView extends ItemView {
 
   private renderSelectionModePanel() {
     const state = this.textSearchState!;
+    this.renderId++; // take ownership of contentEl so in-flight refresh() continuations bail
     this.simulation?.stop(); this.simulation = null;
     this.resizeObserver?.disconnect(); this.resizeObserver = null;
     this.listUpdateFn = null;
@@ -1336,6 +1352,7 @@ class LinkLinkView extends ItemView {
     this.listUpdateFn = null;
     this.selectionBtn = null;
 
+    const myRenderId = ++this.renderId;
     const el = this.contentEl;
     el.empty();
     el.addClass('ll-container');
@@ -1352,6 +1369,9 @@ class LinkLinkView extends ItemView {
       const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(activeFile);
       const naturalPaths = new Set([...outgoingPaths, ...backlinkPaths]);
       const baseResults = await this.plugin.getRelated(activeFile, naturalPaths);
+      // A newer refresh() call started while we were awaiting above — it has
+      // already rebuilt contentEl, so appending here would duplicate it.
+      if (myRenderId !== this.renderId) return;
       el.empty(); el.addClass('ll-container');
 
       const header  = el.createDiv({ cls: 'll-header' });
@@ -1359,6 +1379,7 @@ class LinkLinkView extends ItemView {
 
       // Always show linked notes regardless of Top N / threshold
       const extra = await this.plugin.getLinkedResults(activeFile, baseResults);
+      if (myRenderId !== this.renderId) return;
       const allResults = extra.length > 0 ? [...baseResults, ...extra] : baseResults;
       const results: ResultEntry[] = allResults.map(r => ({
         ...r,
@@ -1437,6 +1458,10 @@ class LinkLinkView extends ItemView {
       else         this.renderList(el, results, activeFile);
 
     } catch (e) {
+      // A newer render owns contentEl now — a stale repaint here would either
+      // clobber it or, if that render is still awaiting, leave this error
+      // panel's graph stacked under the one it appends when it resumes.
+      if (myRenderId !== this.renderId) return;
       el.empty(); el.addClass('ll-container');
       if (e instanceof EmbeddingNotFoundError) {
         this.renderMissingEmbeddingPanel(el, e, activeFile);
@@ -4246,19 +4271,27 @@ class LinkLinkSettingTab extends PluginSettingTab {
           .addButton(btn => {
             btn.setButtonText('Restore defaults');
             btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
-            btn.onClick(() => void (async () => {
-              const keys: (keyof LinkLinkSettings)[] = [
-                'autoIndexMode', 'mtimeSource', 'mtimeField',
-                'progressDisplay', 'notificationTimeout',
-                'indexMode',
-              ];
-              const sr = S as Record<keyof LinkLinkSettings, unknown>;
-              for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
-              S.excludePaths = []; S.includePaths = [];
-              await save();
-              body.empty();
-              renderEmbedding();
-            })());
+            btn.onClick(() => {
+              new ConfirmModal(app,
+                'Restore indexing defaults?',
+                'This resets all indexing settings, including include/exclude paths, to their defaults.',
+                async () => {
+                  const keys: (keyof LinkLinkSettings)[] = [
+                    'autoIndexMode', 'mtimeSource', 'mtimeField',
+                    'progressDisplay', 'notificationTimeout',
+                    'indexMode',
+                  ];
+                  const sr = S as Record<keyof LinkLinkSettings, unknown>;
+                  for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
+                  S.excludePaths = []; S.includePaths = [];
+                  await save();
+                  body.empty();
+                  renderEmbedding();
+                },
+                'Restore defaults',
+                true
+              ).open();
+            });
           });
 
         idxBtn.addEventListener('click', () => void (async () => {
@@ -4471,17 +4504,25 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addButton(btn => {
           btn.setButtonText('Restore defaults');
           btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
-          btn.onClick(() => void (async () => {
-            const keys: (keyof LinkLinkSettings)[] = [
-              'topN', 'threshold', 'relatedFieldName',
-            ];
-            const sr = S as Record<keyof LinkLinkSettings, unknown>;
-            for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
-            S.ignoredPaths = []; S.readOnlyPaths = [];
-            await save();
-            body.empty();
-            renderInterlink();
-          })());
+          btn.onClick(() => {
+            new ConfirmModal(app,
+              'Restore interlink defaults?',
+              'This resets all interlink settings, including ignored and read-only paths, to their defaults.',
+              async () => {
+                const keys: (keyof LinkLinkSettings)[] = [
+                  'topN', 'threshold', 'relatedFieldName',
+                ];
+                const sr = S as Record<keyof LinkLinkSettings, unknown>;
+                for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
+                S.ignoredPaths = []; S.readOnlyPaths = [];
+                await save();
+                body.empty();
+                renderInterlink();
+              },
+              'Restore defaults',
+              true
+            ).open();
+          });
         });
     };
 
@@ -4549,18 +4590,26 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addButton(btn => {
           btn.setButtonText('Restore defaults');
           btn.buttonEl.classList.add('ll-action-btn', 'll-action-btn-danger');
-          btn.onClick(() => void (async () => {
-            const keys: (keyof LinkLinkSettings)[] = [
-              'viewMode', 'colorCenter', 'colorHigh', 'colorMid', 'colorLow', 'autoFit',
-              'textFadeThreshold', 'nodeSizeMultiplier', 'lineSizeMultiplier',
-              'centerStrength', 'repelStrength', 'linkStrength', 'linkDistance',
-            ];
-            const sr = S as Record<keyof LinkLinkSettings, unknown>;
-            for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
-            await save();
-            body.empty();
-            renderGraph();
-          })());
+          btn.onClick(() => {
+            new ConfirmModal(app,
+              'Restore graph defaults?',
+              'This resets all graph display and force settings to their defaults.',
+              async () => {
+                const keys: (keyof LinkLinkSettings)[] = [
+                  'viewMode', 'colorCenter', 'colorHigh', 'colorMid', 'colorLow', 'autoFit',
+                  'textFadeThreshold', 'nodeSizeMultiplier', 'lineSizeMultiplier',
+                  'centerStrength', 'repelStrength', 'linkStrength', 'linkDistance',
+                ];
+                const sr = S as Record<keyof LinkLinkSettings, unknown>;
+                for (const k of keys) sr[k] = DEFAULT_SETTINGS[k];
+                await save();
+                body.empty();
+                renderGraph();
+              },
+              'Restore defaults',
+              true
+            ).open();
+          });
         });
     };
 
