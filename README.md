@@ -26,6 +26,7 @@ Same amount of notes on examples below. More semantic connections between relate
 - **Interlink Vault** — performs semantic search across the entire index, finds the top N similar notes for each one, and populates a `related:` field with native Obsidian `[[links]]`. That way every note finds its connections with other notes that share similar concepts and ideas, even if they were never connected manually. Available as a command palette entry.
 - **Selection Mode** — run a semantic search on any selected text passage: select 5 or more words in any note, click the button, and the panel switches to showing notes semantically related only to that passage.
 - **Live Mode** — tracks either your current paragraph or the last N words before the cursor, and re-embeds it automatically a short pause after you stop typing. The panel switches to showing notes semantically related only to that segment.
+- **Link Suggester** — as you type, a small suggestion appears whenever your text matches an existing note's title or alias — no need to type `[[ ]]` yourself. Click it, or press Enter right after it, to turn the match into a `[[link]]`. Multiple suggestions can stay on screen at once, so you can write freely and link things up afterward.
 - **Commands** — all major actions are available from the command palette:
     - _Open related notes panel_
     - _Index Vault_
@@ -39,6 +40,7 @@ Same amount of notes on examples below. More semantic connections between relate
     - _Changes detection_ — by default the plugin uses the OS file modification timestamp to skip unchanged notes. If your sync tool (Dropbox, iCloud, OneDrive etc.) overwrites timestamps on transfer, you can point it at a custom frontmatter date field combined with [Linter](https://github.com/platers/obsidian-linter) plugin.
     - _Graph view_ — adjust node colors for similarity groups, their size, link thickness, and forces applied.
     - _`related:` frontmatter_ — if you already use that field name in your vault you can configure to use a new custom field name. `related:` is default and will be used as a reference in this README file.
+    - _Link Suggester delay_ — how long an unclicked suggestion stays on screen before disappearing; set to `0` to keep suggestions on screen until you act on them or press Esc.
 
 ## Requirements
 

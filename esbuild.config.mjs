@@ -41,7 +41,7 @@ const stubNodeModulesPlugin = {
 esbuild.build({
   entryPoints: ['main.ts'],
   bundle: true,
-  external: ['obsidian', 'node:buffer'],
+  external: ['obsidian', 'node:buffer', '@codemirror/state', '@codemirror/view'],
   format: 'cjs',
   target: 'es2018',
   logLevel: 'info',

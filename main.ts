@@ -18,6 +18,7 @@ import {
 } from 'obsidian';
 import { IndexingService, type IndexEntry } from './indexing';
 import { InterlinkService, ConfirmModal } from './interlink';
+import { TitleAliasIndex, buildLinkSuggestExtension } from './linksuggest';
 
 const VIEW_TYPE = 'link-link-view';
 
@@ -91,6 +92,9 @@ interface LinkLinkSettings {
   liveModeUseMainParams: boolean;
   liveModeTopN: number;
   liveModeThreshold: number;
+  // Link Suggester
+  linkSuggestEnabled: boolean;
+  linkSuggestDismissSec: number; // 0 = persist indefinitely
 }
 
 const DEFAULT_SETTINGS: LinkLinkSettings = {
@@ -137,6 +141,8 @@ const DEFAULT_SETTINGS: LinkLinkSettings = {
   liveModeUseMainParams: true,
   liveModeTopN: 15,
   liveModeThreshold: 0.5,
+  linkSuggestEnabled: true,
+  linkSuggestDismissSec: 0,
 };
 
 
@@ -2205,6 +2211,7 @@ export default class LinkLinkPlugin extends Plugin {
   settings: LinkLinkSettings = DEFAULT_SETTINGS;
   indexingService!: IndexingService;
   interlinkService!: InterlinkService;
+  titleAliasIndex!: TitleAliasIndex;
   private existingIndexCache: IndexEntry[] | null = null;
   private existingIndexMtime = 0;
   private indexPopup: IndexProgressPopup | null = null;
@@ -2266,6 +2273,8 @@ export default class LinkLinkPlugin extends Plugin {
     await this.loadSettings();
     this.indexingService  = new IndexingService(this.app, this);
     this.interlinkService = new InterlinkService(this.app, this);
+    this.titleAliasIndex  = new TitleAliasIndex(this.app);
+    this.registerEditorExtension(buildLinkSuggestExtension(this.app, this, this.titleAliasIndex));
     this.registerView(VIEW_TYPE, (leaf) => new LinkLinkView(leaf, this));
     this.addRibbonIcon('link', 'Link Link!', () => this.activateView());
     this.addCommand({ id: 'open', name: 'Open related notes panel', callback: () => this.activateView() });
@@ -2374,6 +2383,21 @@ export default class LinkLinkPlugin extends Plugin {
       this.updateViewBadges(activeFile);
     }));
 
+    // Keep the Link Suggester's title/alias index fresh incrementally — cheap
+    // per-file updates rather than a full vault rescan on every change.
+    this.registerEvent(this.app.vault.on('create', (file) => {
+      if (file instanceof TFile && file.extension === 'md') this.titleAliasIndex.addFile(file);
+    }));
+    this.registerEvent(this.app.vault.on('delete', (file) => {
+      if (file instanceof TFile && file.extension === 'md') this.titleAliasIndex.removeFile(file.path);
+    }));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      if (file instanceof TFile && file.extension === 'md') this.titleAliasIndex.renameFile(file, oldPath);
+    }));
+    this.registerEvent(this.app.metadataCache.on('changed', (file) => {
+      this.titleAliasIndex.updateFile(file);
+    }));
+
     // Auto-index on file save — debounced to batch rapid saves and absorb
     // Linter's second write, eliminating race conditions on the index file.
     let fileSaveTimer: number | null = null;
@@ -2407,6 +2431,7 @@ export default class LinkLinkPlugin extends Plugin {
     this.addSettingTab(new LinkLinkSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
       void this.activateView();
+      this.titleAliasIndex.build();
       // Auto-index on startup (delayed to not block Obsidian loading)
       if (this.settings.autoIndexMode === 'startup' && this.settings.embeddingSource !== 'existing') {
         window.setTimeout(() => {
@@ -4805,6 +4830,47 @@ class LinkLinkSettingTab extends PluginSettingTab {
       slider(liveSettingsWrap, 'Update delay (seconds)',
         'How long to wait after you stop typing before re-running the search.',
         'liveModeUpdateDelaySec', 0.5, 5, 0.5);
+
+      // ── LINK SUGGESTER ────────────────────────────────────────────────
+      new Setting(body).setName('Link Suggester').setHeading();
+
+      const suggestHowBox    = body.createDiv({ cls: 'll-how-box' });
+      const suggestHowHeader = suggestHowBox.createDiv({ cls: 'll-how-header' });
+      const suggestChevronEl = suggestHowHeader.createSpan({ cls: 'll-how-chevron' });
+      setIcon(suggestChevronEl, 'chevron-right');
+      suggestHowHeader.createSpan({ text: 'How it works', cls: 'll-how-title' });
+
+      const suggestHowBody = suggestHowBox.createDiv({ cls: 'll-how-body' });
+      suggestHowBody.createEl('p', { text: 'Only works in Editor mode.', cls: 'll-how-editor-note' });
+      const suggestUl = suggestHowBody.createEl('ul', { cls: 'll-how-list' });
+      suggestUl.createEl('li', { text: 'As you type, a small tooltip appears above a word or phrase that matches an existing note\'s title or alias.' });
+      suggestUl.createEl('li', { text: 'Click the tooltip, or press Enter while your cursor is right after the matched text, to turn it into a [[link]].' });
+      suggestUl.createEl('li', { text: 'Multiple suggestions can be on screen at once — write a full paragraph and go back to accept any of them later.' });
+      suggestUl.createEl('li', { text: 'Press Esc to dismiss all visible suggestions at once.' });
+      suggestUl.createEl('li', { text: 'Each suggestion stays up for the delay set below.' });
+      suggestHowHeader.addEventListener('click', () => {
+        const open = suggestHowBody.classList.toggle('ll-how-body-open');
+        setIcon(suggestChevronEl, open ? 'chevron-down' : 'chevron-right');
+      });
+
+      let suggestSettingsWrap: HTMLElement;
+      new Setting(body)
+        .setName('Enable')
+        .setDesc('Suggests turning typed text into [[links]] when it matches an existing note\'s title or alias.')
+        .addToggle(t => t.setValue(S.linkSuggestEnabled).onChange(v => {
+          void (async () => {
+            S.linkSuggestEnabled = v;
+            await save();
+            suggestSettingsWrap.setCssStyles({ display: v ? '' : 'none' });
+          })();
+        }));
+
+      suggestSettingsWrap = body.createDiv();
+      suggestSettingsWrap.setCssStyles({ display: S.linkSuggestEnabled ? '' : 'none' });
+
+      slider(suggestSettingsWrap, 'Dismiss after (seconds)',
+        'How long an unclicked suggestion stays on screen before disappearing. Set to 0 to keep suggestions on screen indefinitely (until clicked, accepted, or dismissed with Esc).',
+        'linkSuggestDismissSec', 0, 15, 1);
     };
 
     switchTab('embedding');

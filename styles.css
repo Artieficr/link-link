@@ -188,6 +188,28 @@
 .ll-list-tip-title { font-weight: 600; font-size: 0.95em; color: var(--bold-color, var(--text-normal)); }
 .ll-list-tip-body  { color: var(--text-normal); }
 
+/* ── Link Suggester tooltip (floating, positioned via CM6 coordsAtPos) ── */
+
+.ll-linksuggest-tip {
+  position: fixed;
+  z-index: 9999;
+  transform: translate(-50%, -100%); /* anchor point is the tooltip's bottom-center, centered above the matched text */
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.78em;
+  line-height: 1.4;
+  color: var(--text-accent);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  white-space: nowrap;
+}
+.ll-linksuggest-tip:hover {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
 /* Natural connection (O or B) but not in frontmatter — add button dimmed so unconnected notes stand out */
 .ll-item-link-btn.is-natural         { opacity: 0.35; }
 .ll-item:hover .ll-item-link-btn.is-natural { opacity: 0.6; }
