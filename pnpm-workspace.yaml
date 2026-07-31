@@ -8,3 +8,9 @@ overrides:
   # the 7.x line onnx-proto/onnxruntime-web expect — 8.x has its own
   # vulnerable range (<=8.5.0) and risks breaking their 6.x/7.x-shaped API.
   protobufjs: ^7.6.3
+  # >=0.35.0 excludes libvips CVEs (GHSA-f88m-g3jw-g9cj) pulled in by
+  # @xenova/transformers, which pins 0.32.6. sharp's own build is disabled
+  # below (allowBuilds), and this plugin only ever runs the text-embedding
+  # pipeline, never the image pipeline sharp backs — practical exposure was
+  # already nil, this just keeps the audit clean too.
+  sharp: ">=0.35.0"

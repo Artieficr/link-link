@@ -24,10 +24,20 @@ const prod = process.argv[2] === 'production';
 // want and never need (models are fetched from CDN). This plugin intercepts
 // those two requires and returns empty stubs so the fs code path becomes a
 // no-op, while WASM/fetch loading continues to work normally.
+//
+// 'sharp' is also stubbed here: @xenova/transformers only imports it for its
+// image-embedding pipeline, which this plugin never calls (text embeddings
+// only) — its own package.json already marks "sharp": false in its "browser"
+// field for exactly this reason. esbuild's built-in browser-field handling
+// works for that when sharp ships a legacy "main"-only package.json, but not
+// once sharp publishes a modern conditional "exports" map (as newer versions
+// do) — the built-in disabled-module stub doesn't satisfy `import sharp from
+// 'sharp'`'s expected default export in that shape. Intercepting it here
+// ourselves, the same way as fs/path above, sidesteps that mismatch entirely.
 const stubNodeModulesPlugin = {
   name: 'stub-node-modules',
   setup(build) {
-    build.onResolve({ filter: /^(fs|path)$/ }, args => ({
+    build.onResolve({ filter: /^(fs|path|sharp)$/ }, args => ({
       path: args.path,
       namespace: 'stub-node-modules',
     }));

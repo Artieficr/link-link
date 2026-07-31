@@ -4,6 +4,12 @@ export default [
   { ignores: ["main.js", "esbuild.config.mjs", "eslint.config.js"] },
   ...obsidianmd.configs.recommended,
   {
+    // Scoped to *.ts only: tsconfig.json's "include" is ["*.ts"], so type-aware
+    // parserOptions.project can't resolve real types for this file itself (or
+    // any other non-.ts file) — attaching it more broadly makes every
+    // identifier here resolve to `any`, tripping @typescript-eslint's
+    // no-unsafe-* rules against this very config.
+    files: ["*.ts"],
     languageOptions: {
       parserOptions: {
         project: "./tsconfig.json",
