@@ -11,7 +11,8 @@
     "importHelpers": true,
     "isolatedModules": true,
     "strictNullChecks": true,
-    "lib": ["ES2020", "DOM"]
+    "lib": ["ES2020", "DOM"],
+    "allowJs": true
   },
-  "include": ["*.ts"]
+  "include": ["*.ts", "eslint.config.js"]
 }

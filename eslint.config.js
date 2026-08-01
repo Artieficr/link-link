@@ -10,13 +10,15 @@ export default [
     files: ["*.ts"],
     languageOptions: {
       parserOptions: {
-        // Points at a dedicated tsconfig (not the build's own tsconfig.json)
-        // that explicitly includes this very file via allowJs — so that
-        // however a given tool ends up type-aware-linting eslint.config.js
+        // tsconfig.json's own "include" covers this file too (via allowJs) —
+        // so however a given tool ends up type-aware-linting eslint.config.js
         // (Obsidian's review pipeline apparently does, regardless of the
-        // `files` restriction above), it resolves real types instead of
-        // `any`, rather than relying solely on file-scoping to dodge it.
-        project: "./tsconfig.eslint.json",
+        // `files` restriction above, and regardless of a separate tsconfig
+        // pointed at from here — a prior attempt using a differently-named
+        // tsconfig.eslint.json had no effect, suggesting external tooling
+        // doesn't consult this path and instead auto-discovers a file named
+        // exactly tsconfig.json), it resolves real types instead of `any`.
+        project: "./tsconfig.json",
         tsconfigRootDir: process.cwd(),
       },
     },
