@@ -3751,7 +3751,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
         const info = body.createDiv({ cls: 'll-model-info' });
         info.createDiv({ text: 'bge-small-en-v1.5 by BAAI', cls: 'll-model-info-name' });
         info.createDiv({
-          text: '384-dimensional sentence embeddings · shipped with the plugin · no downloads, no cloud',
+          text: '384-dimensional sentence embeddings · downloads once · no cloud service dependency',
           cls: 'll-model-info-desc',
         });
         const link = info.createEl('a', { text: 'View on HuggingFace →', cls: 'll-model-info-link' });

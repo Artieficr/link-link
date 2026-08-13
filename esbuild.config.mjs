@@ -1,6 +1,7 @@
 import esbuild from 'esbuild';
 import process from 'process';
 import path from 'path';
+import fs from 'fs';
 import { createRequire } from 'module';
 
 // Resolve onnxruntime-web through @xenova/transformers so pnpm's virtual
@@ -48,6 +49,20 @@ const stubNodeModulesPlugin = {
   },
 };
 
+// onnxruntime-web's minified bundle also embeds its threaded-WASM worker
+// bootstrap script as a plain string (so it can spin up a Worker without a
+// separate file), which contains its own literal require("fs") and
+// require("worker_threads") calls. Being string contents rather than a real
+// import/require, esbuild's module resolution — and so stubNodeModulesPlugin
+// above — never sees these, and they survive verbatim into the output.
+// This worker is only ever created when the ONNX threaded backend is armed,
+// which requires numThreads > 1; indexing.ts hardcodes numThreads = 1 (not
+// user-configurable), so that code path can never run. Blank out the two
+// call sites post-build so no literal Node filesystem/threading require
+// remains in the shipped bundle. If numThreads is ever raised above 1, this
+// must be revisited — the threaded worker would need the real requires back.
+const outfile = 'main.js';
+
 esbuild.build({
   entryPoints: ['main.ts'],
   bundle: true,
@@ -57,9 +72,20 @@ esbuild.build({
   logLevel: 'info',
   sourcemap: prod ? false : 'inline',
   treeShaking: true,
-  outfile: 'main.js',
+  outfile,
+  write: false,
   plugins: [stubNodeModulesPlugin],
   alias: {
     'onnxruntime-node': onnxWebPath,
   },
+}).then(result => {
+  for (const file of result.outputFiles) {
+    let contents = file.text;
+    if (file.path.endsWith(outfile)) {
+      contents = contents
+        .split('require("fs")').join('{}')
+        .split('require("worker_threads")').join('{}');
+    }
+    fs.writeFileSync(file.path, contents);
+  }
 }).catch(() => process.exit(1));

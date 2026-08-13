@@ -1,0 +1,26 @@
+name: Model availability
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Hugging Face model files
+        run: |
+          urls=(
+            "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/config.json"
+            "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/tokenizer.json"
+            "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx"
+          )
+          status=0
+          for url in "${urls[@]}"; do
+            if ! curl --fail --silent --show-error --location --output /dev/null "$url"; then
+              echo "::error::Unreachable: $url"
+              status=1
+            fi
+          done
+          exit $status
