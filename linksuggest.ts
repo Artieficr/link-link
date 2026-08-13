@@ -7,12 +7,26 @@ import type LinkLinkPlugin from './main';
 // aliases longer than this simply won't be matched — keeps the per-trigger
 // cost bounded regardless of vault content.
 const MAX_PHRASE_WORDS = 6;
-const WORD_BOUNDARY_RE = /[\s.,;:!?()[\]{}"'`]/;
+// Excludes the straight apostrophe so a contraction or possessive inside a
+// title or alias tokenizes as a single word; keeping it out of the boundary
+// set is what lets a candidate phrase reconstruct the exact key text stored
+// in the index.
+const WORD_BOUNDARY_RE = /[\s.,;:!?()[\]{}"`]/;
 const TRIGGER_DEBOUNCE_MS = 150;
+// Bounds on scanning a pasted block: a paste can insert many linkable
+// phrases at once, so these keep the scan cost and the number of tooltips
+// shown bounded regardless of how much text was pasted.
+const MAX_PASTE_SCAN_CHARS = 20000;
+const MAX_PASTE_MATCHES = 20;
 
 interface TitleAliasEntry {
   file: TFile;
-  displayAs: string; // canonical title or alias text, in its original casing
+  // Snapshot of the file's path at the time this entry was added. Obsidian
+  // mutates a TFile's .path property in place on rename rather than issuing
+  // a new object, so a live file.path always reflects the file's current
+  // location. removeFile needs the path an entry was originally filed under
+  // to find it by the path being removed.
+  path: string;
   isTitle: boolean;  // true = filename match, false = alias match
 }
 
@@ -46,23 +60,23 @@ export class TitleAliasIndex {
     for (const file of this.app.vault.getMarkdownFiles()) this.addFile(file);
   }
 
-  private keysForFile(file: TFile): { key: string; displayAs: string; isTitle: boolean }[] {
-    const out = [{ key: file.basename.toLowerCase(), displayAs: file.basename, isTitle: true }];
+  private keysForFile(file: TFile): { key: string; isTitle: boolean }[] {
+    const out = [{ key: file.basename.toLowerCase(), isTitle: true }];
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? null;
     const aliases = parseFrontMatterAliases(fm) ?? [];
     for (const alias of aliases) {
       const trimmed = alias.trim();
-      if (trimmed) out.push({ key: trimmed.toLowerCase(), displayAs: trimmed, isTitle: false });
+      if (trimmed) out.push({ key: trimmed.toLowerCase(), isTitle: false });
     }
     return out;
   }
 
   addFile(file: TFile) {
     const keys = this.keysForFile(file);
-    for (const { key, displayAs, isTitle } of keys) {
+    for (const { key, isTitle } of keys) {
       if (key.length < this.minKeyLength) this.minKeyLength = key.length;
       const list = this.byKey.get(key);
-      const entry: TitleAliasEntry = { file, displayAs, isTitle };
+      const entry: TitleAliasEntry = { file, path: file.path, isTitle };
       if (list) list.push(entry); else this.byKey.set(key, [entry]);
     }
     this.byPath.set(file.path, keys.map(k => k.key));
@@ -76,7 +90,7 @@ export class TitleAliasIndex {
       if (key.length === this.minKeyLength) mayShrinkMin = true;
       const list = this.byKey.get(key);
       if (!list) continue;
-      const filtered = list.filter(e => e.file.path !== path);
+      const filtered = list.filter(e => e.path !== path);
       if (filtered.length > 0) this.byKey.set(key, filtered);
       else this.byKey.delete(key);
     }
@@ -183,9 +197,12 @@ function resolveTarget(app: App, entries: TitleAliasEntry[], phrase: string, sou
   return destMatch ?? titleMatch ?? entries[0];
 }
 
+// The link's target must always be the note's real title, never the alias
+// text that got it matched.
 function buildLinkText(entry: TitleAliasEntry, asTyped: string): string {
-  if (entry.isTitle && entry.displayAs === asTyped) return `[[${entry.displayAs}]]`;
-  return `[[${entry.displayAs}|${asTyped}]]`;
+  const target = entry.file.basename;
+  if (target === asTyped) return `[[${target}]]`;
+  return `[[${target}|${asTyped}]]`;
 }
 
 // ── CM6 editor extension ─────────────────────────────────────────────────────
@@ -204,6 +221,7 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
     private view: EditorView;
     private suggestions: ActiveSuggestion[] = [];
     private triggerTimer: number | null = null;
+    private pendingPasteRanges: { from: number; to: number }[] = [];
     private onResize = () => this.scheduleReposition();
     private onScroll = () => this.scheduleReposition();
     private onKeydownCapture = (event: KeyboardEvent) => this.handleKeydownCapture(event);
@@ -228,10 +246,28 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
       }
 
       if (update.docChanged) {
+        // A paste is scanned differently from typing: typing only ever
+        // produces one trailing phrase to check, right before the cursor,
+        // but a paste can contain several linkable phrases scattered
+        // throughout the inserted text. The inserted range(s) are captured
+        // here as raw offsets; any edit before the debounced callback below
+        // runs clears and reschedules this timer, so those offsets are
+        // always still valid by the time the callback fires.
+        this.pendingPasteRanges = [];
+        if (update.transactions.some(tr => tr.isUserEvent('input.paste'))) {
+          let totalChars = 0;
+          update.changes.iterChanges((_fromA, _toA, fromB, toB) => {
+            if (toB > fromB) { this.pendingPasteRanges.push({ from: fromB, to: toB }); totalChars += toB - fromB; }
+          });
+          if (totalChars > MAX_PASTE_SCAN_CHARS) this.pendingPasteRanges = [];
+        }
+
         if (this.triggerTimer !== null) window.clearTimeout(this.triggerTimer);
+        const pasteRanges = this.pendingPasteRanges;
         this.triggerTimer = window.setTimeout(() => {
           this.triggerTimer = null;
-          this.tryTrigger();
+          if (pasteRanges.length > 0) this.tryTriggerPaste(pasteRanges);
+          else this.tryTrigger();
         }, TRIGGER_DEBOUNCE_MS);
       }
     }
@@ -278,21 +314,45 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
         // rather than trusting non-null as "on screen".
         read: (view) => ({
           paneRect: view.scrollDOM.getBoundingClientRect(),
-          items: this.suggestions.map(s => ({
-            s, start: view.coordsAtPos(s.from), end: view.coordsAtPos(s.to, -1),
-          })),
+          items: this.suggestions.map(s => ({ s, rect: this.anchorRect(view, s) })),
         }),
         write: ({ paneRect, items }) => {
-          for (const { s, start, end } of items) {
-            if (!start || !end || start.top < paneRect.top || start.top > paneRect.bottom) {
+          for (const { s, rect } of items) {
+            if (!rect || rect.top < paneRect.top || rect.top > paneRect.bottom) {
               s.tooltipEl.setCssStyles({ display: 'none' });
               continue;
             }
-            const midX = (start.left + end.right) / 2;
-            s.tooltipEl.setCssStyles({ display: '', left: midX + 'px', top: (start.top - 6) + 'px' });
+            const midX = (rect.left + rect.right) / 2;
+            s.tooltipEl.setCssStyles({ display: '', left: midX + 'px', top: (rect.top - 6) + 'px' });
           }
         },
       });
+    }
+
+    // Horizontal span + row top to anchor a suggestion's tooltip above. When
+    // soft-wrap splits the phrase across two visual rows, start and end sit
+    // on different rows, so the phrase is split at word boundaries, words
+    // are grouped by the row they landed on, and the tooltip anchors above
+    // whichever row is visually longer.
+    private anchorRect(view: EditorView, s: ActiveSuggestion): { top: number; left: number; right: number } | null {
+      const start = view.coordsAtPos(s.from);
+      const end   = view.coordsAtPos(s.to, -1);
+      if (!start || !end) return null;
+      if (Math.abs(start.top - end.top) < 1) return { top: start.top, left: start.left, right: end.right };
+
+      const rows: { top: number; left: number; right: number }[] = [];
+      let offset = s.from;
+      for (const word of s.phrase.split(' ')) {
+        const wordStart = view.coordsAtPos(offset, 1);
+        const wordEnd   = view.coordsAtPos(offset + word.length, -1);
+        offset += word.length + 1; // +1 for the separating space
+        if (!wordStart || !wordEnd) continue;
+        const row = rows.find(r => Math.abs(r.top - wordStart.top) < 1);
+        if (row) { row.left = Math.min(row.left, wordStart.left); row.right = Math.max(row.right, wordEnd.right); }
+        else rows.push({ top: wordStart.top, left: wordStart.left, right: wordEnd.right });
+      }
+      if (rows.length === 0) return { top: start.top, left: start.left, right: end.right };
+      return rows.reduce((widest, r) => (r.right - r.left > widest.right - widest.left ? r : widest));
     }
 
     private tryTrigger() {
@@ -329,6 +389,83 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
       this.show(from, to, match.phrase, linkText);
     }
 
+    // Unlike typing (one trailing phrase per keystroke), a pasted block can
+    // contain several independently linkable phrases anywhere in the
+    // inserted text. Scans every line the paste touched for word-boundary
+    // positions and tries a match at each, left to right, instead of only
+    // checking whatever phrase ends at the cursor.
+    private tryTriggerPaste(ranges: { from: number; to: number }[]) {
+      if (!plugin.settings.linkSuggestEnabled) return;
+      const info = this.view.state.field(editorInfoField, false);
+      const sourceFile = info?.file ?? null;
+      if (!sourceFile) return;
+
+      const minLength = Number.isFinite(index.minKeyLength) ? index.minKeyLength : 1;
+      let shown = 0;
+      for (const range of ranges) {
+        if (shown >= MAX_PASTE_MATCHES) break;
+        shown += this.scanRangeForMatches(range, sourceFile, minLength, MAX_PASTE_MATCHES - shown);
+      }
+    }
+
+    // Finds and shows every non-overlapping phrase match inside `range`
+    // (line by line), skipping past each match found so a longer phrase
+    // never gets re-detected as two shorter overlapping ones.
+    private scanRangeForMatches(
+      range: { from: number; to: number },
+      sourceFile: TFile,
+      minLength: number,
+      budget: number
+    ): number {
+      let shown = 0;
+      const doc = this.view.state.doc;
+      const startLine = doc.lineAt(Math.min(range.from, doc.length));
+      const endLine   = doc.lineAt(Math.min(range.to, doc.length));
+
+      for (let n = startLine.number; n <= endLine.number && shown < budget; n++) {
+        const line = doc.line(n);
+        const lineFromCh = Math.max(0, range.from - line.from);
+        const lineToCh   = Math.min(line.length, range.to - line.from);
+
+        // Candidate boundaries: every word-boundary character inside the
+        // pasted portion of this line, plus (on the line the paste ends on)
+        // the paste's own end — which acts as an implicit boundary since a
+        // paste rarely ends on real trailing punctuation/whitespace.
+        const boundaries: number[] = [];
+        for (let i = lineFromCh; i < lineToCh; i++) {
+          if (WORD_BOUNDARY_RE.test(line.text[i])) boundaries.push(i);
+        }
+        if (n === endLine.number) boundaries.push(lineToCh);
+
+        let skipUntil = lineFromCh;
+        for (const boundaryCh of boundaries) {
+          if (shown >= budget) break;
+          if (boundaryCh <= skipUntil) continue;
+          if (isInsideLinkOrCode(line.text, boundaryCh)) continue;
+
+          const match = findPhraseMatch(line.text, boundaryCh, index, minLength);
+          if (!match || match.startCh < skipUntil) continue;
+          if (overlapsClosedLink(line.text, match.startCh, match.endCh)) continue;
+          skipUntil = match.endCh;
+
+          const candidates = match.entries.filter(e => e.file.path !== sourceFile.path);
+          if (candidates.length === 0) continue;
+
+          const from = line.from + match.startCh;
+          const to   = line.from + match.endCh;
+          if (this.isInFrontmatter(sourceFile, from)) continue;
+          // Don't stack a duplicate tooltip over a span that already has one.
+          if (this.suggestions.some(s => s.from === from && s.to === to)) continue;
+
+          const target   = resolveTarget(app, candidates, match.phrase, sourceFile.path);
+          const linkText = buildLinkText(target, match.phrase);
+          this.show(from, to, match.phrase, linkText);
+          shown++;
+        }
+      }
+      return shown;
+    }
+
     private isInFrontmatter(file: TFile, pos: number): boolean {
       const fmPos = app.metadataCache.getFileCache(file)?.frontmatterPosition;
       if (!fmPos) return false;
@@ -337,7 +474,7 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
 
     private show(from: number, to: number, phrase: string, linkText: string) {
       const tooltipEl = activeDocument.body.createDiv({ cls: 'll-linksuggest-tip' });
-      tooltipEl.setText(`Link ${linkText}`);
+      tooltipEl.setText(linkText);
 
       const dismissSec = plugin.settings.linkSuggestDismissSec;
       const suggestion: ActiveSuggestion = {
