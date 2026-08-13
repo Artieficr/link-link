@@ -1477,12 +1477,12 @@ class LinkLinkView extends ItemView {
     }
   }
 
-  // Missing/excluded embedding no longer blocks the graph or list — the current
-  // note can still have backlinks/outgoing/related-field connections worth
-  // seeing. This panel keeps the view toggle so the user isn't stuck on
+  // A missing/excluded embedding doesn't block the graph or list — the
+  // current note can still have backlinks/outgoing/related-field connections
+  // worth seeing. This panel keeps the view toggle so the user isn't stuck on
   // whichever mode was last active; the "no embedding" reason and, where
-  // actionable, the indexing action move into the graph's warning badge, or
-  // stay as the inline banner above the list in list mode.
+  // actionable, the indexing action live in the graph's warning badge, or as
+  // the inline banner above the list in list mode.
   private renderMissingEmbeddingPanel(el: HTMLElement, err: EmbeddingNotFoundError, activeFile: TFile) {
     const header = el.createDiv({ cls: 'll-header' });
     header.createSpan({ text: activeFile.basename, cls: 'll-title' });
