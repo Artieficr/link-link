@@ -2270,12 +2270,19 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   async onload() {
+    // Registered before loadSettings() resolves: Obsidian force-rebuilds any
+    // existing leaf of this view type the instant the type (un)registers
+    // (e.g. old plugin instance unloading during an update, or an eagerly-
+    // hydrated leaf at startup), briefly reporting it as an "empty" view
+    // mid-swap. Registering late widens that window past our own lookups in
+    // activateView(), which then can't find the existing leaf and opens a
+    // second one in the default location.
+    this.registerView(VIEW_TYPE, (leaf) => new LinkLinkView(leaf, this));
     await this.loadSettings();
     this.indexingService  = new IndexingService(this.app, this);
     this.interlinkService = new InterlinkService(this.app, this);
     this.titleAliasIndex  = new TitleAliasIndex(this.app);
     this.registerEditorExtension(buildLinkSuggestExtension(this.app, this, this.titleAliasIndex));
-    this.registerView(VIEW_TYPE, (leaf) => new LinkLinkView(leaf, this));
     this.addRibbonIcon('link', 'Link Link!', () => this.activateView());
     this.addCommand({ id: 'open', name: 'Open related notes panel', callback: () => this.activateView() });
 
@@ -2460,7 +2467,12 @@ export default class LinkLinkPlugin extends Plugin {
 
   async activateView() {
     const { workspace } = this.app;
-    let leaf = workspace.getLeavesOfType(VIEW_TYPE)[0];
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE);
+    let leaf = leaves[0];
+    // Clean up any strays left behind by a past race between our view-type
+    // registration and Obsidian's own leaf-rebuild-on-(un)register (see
+    // onload) so duplicates don't keep accumulating across updates/launches.
+    for (let i = 1; i < leaves.length; i++) leaves[i].detach();
     if (!leaf) {
       leaf = workspace.getRightLeaf(false) ?? workspace.getLeaf(true);
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
