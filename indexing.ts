@@ -13,6 +13,35 @@ export interface IndexEntry {
   mtime?: number;
 }
 
+export function matchesList(filePath: string, list: string[]): boolean {
+  for (const p of list) {
+    const norm = p.replace(/\/$/, '');
+    if (filePath === norm || filePath === norm + '.md' || filePath.startsWith(norm + '/')) return true;
+  }
+  return false;
+}
+
+interface PathScopeSettings {
+  ignoredPaths: string[];
+  indexMode: 'exclude' | 'include';
+  excludePaths: string[];
+  includePaths: string[];
+}
+
+// Shared by IndexingService.getFilesToIndex() and InterlinkService.isIgnored()
+// so both services agree on what "in scope" means.
+export function isPathInScope(filePath: string, settings: PathScopeSettings): boolean {
+  if (matchesList(filePath, settings.ignoredPaths)) return false;
+
+  if (settings.indexMode === 'exclude') {
+    if (matchesList(filePath, settings.excludePaths)) return false;
+  } else if (settings.indexMode === 'include' && settings.includePaths.length > 0) {
+    if (!matchesList(filePath, settings.includePaths)) return false;
+  }
+
+  return true;
+}
+
 export class IndexingService {
   private app: App;
   private plugin: LinkLinkPlugin;
@@ -127,27 +156,7 @@ export class IndexingService {
   // ── File filtering ────────────────────────────────────────────────────────
 
   getFilesToIndex(): TFile[] {
-    const { ignoredPaths, indexMode, excludePaths, includePaths } = this.plugin.settings;
-
-    return this.app.vault.getMarkdownFiles().filter(f => {
-      if (this.matchesList(f.path, ignoredPaths)) return false;
-
-      if (indexMode === 'exclude') {
-        if (this.matchesList(f.path, excludePaths)) return false;
-      } else if (indexMode === 'include' && includePaths.length > 0) {
-        if (!this.matchesList(f.path, includePaths)) return false;
-      }
-
-      return true;
-    });
-  }
-
-  matchesList(filePath: string, list: string[]): boolean {
-    for (const p of list) {
-      const norm = p.replace(/\/$/, '');
-      if (filePath === norm || filePath === norm + '.md' || filePath.startsWith(norm + '/')) return true;
-    }
-    return false;
+    return this.app.vault.getMarkdownFiles().filter(f => isPathInScope(f.path, this.plugin.settings));
   }
 
   // ── Text extraction ───────────────────────────────────────────────────────
@@ -275,7 +284,9 @@ export class IndexingService {
     const existingByPath = new Map(existing.map(e => [e.path, e]));
 
     const allIndexable = this.getFilesToIndex();
-    const filesToCheck = targetFiles ?? allIndexable;
+    const filesToCheck = targetFiles
+      ? targetFiles.filter(f => isPathInScope(f.path, this.plugin.settings))
+      : allIndexable;
     const fullScan     = !targetFiles;
     const currentPaths = fullScan ? new Set(allIndexable.map(f => f.path)) : null;
 

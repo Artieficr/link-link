@@ -111,7 +111,7 @@ export class TitleAliasIndex {
 
   renameFile(file: TFile, oldPath: string) {
     this.removeFile(oldPath);
-    this.addFile(file);
+    if (file.extension === 'md') this.addFile(file);
   }
 
   lookup(phrase: string): TitleAliasEntry[] | undefined {

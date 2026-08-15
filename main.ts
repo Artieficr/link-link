@@ -16,11 +16,26 @@ import {
   requestUrl,
   setIcon,
 } from 'obsidian';
-import { IndexingService, type IndexEntry } from './indexing';
-import { InterlinkService, ConfirmModal } from './interlink';
+import { IndexingService, matchesList, type IndexEntry } from './indexing';
+import { InterlinkService, ConfirmModal, type InterlinkSkipReason } from './interlink';
 import { TitleAliasIndex, buildLinkSuggestExtension } from './linksuggest';
 
 const VIEW_TYPE = 'link-link-view';
+
+// Shared by the panel's "Interlink current note" button and the command
+// palette entry so both report the same reason when runForFile() can't
+// produce an update, instead of always telling the user to re-index.
+function describeInterlinkResult(result: number | InterlinkSkipReason, basename: string, field: string): string {
+  switch (result) {
+    case 'ignored':     return `"${basename}" is excluded from indexing — check the ignored/excluded paths in Settings.`;
+    case 'read-only':   return `"${basename}" is marked read-only — its "${field}:" field won't be modified.`;
+    case 'not-indexed': return `"${basename}" is not in the index — run indexing first.`;
+    default:
+      return result === 0
+        ? `Updated related links for "${basename}". No similar notes found.`
+        : `Updated related links for "${basename}". ${result} similar note${result === 1 ? '' : 's'} added to "${field}:"`;
+  }
+}
 
 // ─── Frontmatter field validation ────────────────────────────────────────────
 
@@ -921,6 +936,7 @@ class LinkLinkView extends ItemView {
   }
 
   async onClose() {
+    this.renderId++; // invalidate any in-flight refresh()/runAdHocSearch() continuations
     if (this.selectionChangeHandler) {
       activeDocument.removeEventListener('selectionchange', this.selectionChangeHandler);
       this.selectionChangeHandler = null;
@@ -1131,6 +1147,12 @@ class LinkLinkView extends ItemView {
         isOutgoing: outgoingPaths.has(r.file.path),
         isBacklink: backlinkPaths.has(r.file.path),
       }));
+
+      // Skip a stale result paint if a newer call already took ownership of
+      // the panel (a second click while this one was still awaiting embed()/
+      // loadAnyIndex(), or the view closed) — mirrors the check below on the
+      // error path.
+      if (myRenderId !== this.renderId) return;
 
       this.liveModeIdle = false;
       this.textSearchState = { text, sourceFile, sourceLine, firstWord, embedding, results, origin };
@@ -1401,12 +1423,7 @@ class LinkLinkView extends ItemView {
             const index = await this.plugin.loadAnyIndex();
             const result = await this.plugin.interlinkService.runForFile(activeFile, index);
             const field = this.plugin.settings.relatedFieldName || 'related';
-            new Notice(result === false
-              ? `"${activeFile.basename}" is not in the index — run indexing first.`
-              : result === 0
-                ? `Updated related links for "${activeFile.basename}". No similar notes found.`
-                : `Updated related links for "${activeFile.basename}". ${result} similar note${result === 1 ? '' : 's'} added to "${field}:"`
-            );
+            new Notice(describeInterlinkResult(result, activeFile.basename, field));
           } catch (e) { new Notice(`Error: ${e instanceof Error ? e.message : String(e)}`); }
         }
       );
@@ -1744,8 +1761,12 @@ class LinkLinkView extends ItemView {
       };
 
       // ── Single button: add / remove frontmatter / faded warning for O or B ─
+      // Generated via Obsidian's own link builder rather than a hand-rolled
+      // `[[title]]` template — a title containing "]]" or "|" would otherwise
+      // produce a malformed link and corrupt the frontmatter list around it.
+      const relatedLink = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
       const linkBtn = item.createEl('button', { cls: 'll-item-link-btn' });
-      let isInFrontmatter = getRelated().some(r => r === `[[${file.basename}]]`);
+      let isInFrontmatter = getRelated().some(r => r === relatedLink);
 
       const refreshBtn = () => {
         linkBtn.empty();
@@ -1777,7 +1798,7 @@ class LinkLinkView extends ItemView {
         if (isInFrontmatter) {
           await this.app.fileManager.processFrontMatter(activeFile, (fm: Record<string, unknown>) => {
             const current = getRelated();
-            const updated = current.filter(r => r !== `[[${file.basename}]]`);
+            const updated = current.filter(r => r !== relatedLink);
             if (updated.length > 0) fm[field] = updated;
             else delete fm[field];
           });
@@ -1786,7 +1807,7 @@ class LinkLinkView extends ItemView {
           refreshBtn();
         } else {
           await this.app.fileManager.processFrontMatter(activeFile, (fm: Record<string, unknown>) => {
-            fm[field] = [...getRelated(), `[[${file.basename}]]`];
+            fm[field] = [...getRelated(), relatedLink];
           });
           new Notice(`Added "${file.basename}" to ${field}:`);
           isInFrontmatter = true;
@@ -1798,7 +1819,7 @@ class LinkLinkView extends ItemView {
       itemUpdaters.push((newOutgoingPaths: Set<string>, newBacklinkPaths: Set<string>) => {
         isOutgoing = newOutgoingPaths.has(file.path);
         isBacklink = newBacklinkPaths.has(file.path);
-        isInFrontmatter = getRelated().some(r => r === `[[${file.basename}]]`);
+        isInFrontmatter = getRelated().some(r => r === relatedLink);
         renderBadges();
         refreshBtn();
       });
@@ -1905,7 +1926,10 @@ class LinkLinkView extends ItemView {
           // eslint-disable-next-line @typescript-eslint/no-base-to-string -- frontmatter values are unknown-shaped user data; a non-string entry just won't match a "[[link]]" wikilink string, which is the only thing compared below
           return Array.isArray(raw) ? raw.map(String) : [String(raw)];
         };
-        const isInFrontmatter = getRelated().some(r => r === `[[${f.basename}]]`);
+        // See the list-view toggle above: generated via Obsidian's link
+        // builder so titles with "]]" or "|" can't corrupt the frontmatter list.
+        const relatedLink = this.app.fileManager.generateMarkdownLink(f, currentFile.path);
+        const isInFrontmatter = getRelated().some(r => r === relatedLink);
         const entry = results.find(r => r.file.path === f.path);
         const isOutgoing = entry?.isOutgoing ?? false;
         const isBacklink = entry?.isBacklink ?? false;
@@ -1913,7 +1937,7 @@ class LinkLinkView extends ItemView {
         if (isInFrontmatter) {
           await this.app.fileManager.processFrontMatter(currentFile, (fm: Record<string, unknown>) => {
             const current = getRelated();
-            const updated = current.filter(r => r !== `[[${f.basename}]]`);
+            const updated = current.filter(r => r !== relatedLink);
             if (updated.length > 0) fm[field] = updated;
             else delete fm[field];
           });
@@ -1921,7 +1945,7 @@ class LinkLinkView extends ItemView {
           new Notice(`Removed "${f.basename}" from ${field}:`);
         } else {
           await this.app.fileManager.processFrontMatter(currentFile, (fm: Record<string, unknown>) => {
-            fm[field] = [...getRelated(), `[[${f.basename}]]`];
+            fm[field] = [...getRelated(), relatedLink];
           });
           this.simulation?.toggleNodeLink(f, true);
           new Notice(`Added "${f.basename}" to ${field}:`);
@@ -2270,13 +2294,12 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   async onload() {
-    // Registered before loadSettings() resolves: Obsidian force-rebuilds any
+    // Must be registered before any await: Obsidian force-rebuilds any
     // existing leaf of this view type the instant the type (un)registers
     // (e.g. old plugin instance unloading during an update, or an eagerly-
     // hydrated leaf at startup), briefly reporting it as an "empty" view
-    // mid-swap. Registering late widens that window past our own lookups in
-    // activateView(), which then can't find the existing leaf and opens a
-    // second one in the default location.
+    // mid-swap. activateView()'s leaf lookup can land inside that window and
+    // fail to find the existing leaf, opening a second one instead.
     this.registerView(VIEW_TYPE, (leaf) => new LinkLinkView(leaf, this));
     await this.loadSettings();
     this.indexingService  = new IndexingService(this.app, this);
@@ -2325,12 +2348,7 @@ export default class LinkLinkPlugin extends Plugin {
             const index = await this.loadAnyIndex();
             const result = await this.interlinkService.runForFile(file, index);
             const field = this.settings.relatedFieldName || 'related';
-            new Notice(result === false
-              ? `"${file.basename}" is not in the index — run Index Vault first.`
-              : result === 0
-                ? `Updated related links for "${file.basename}". No similar notes found.`
-                : `Updated related links for "${file.basename}". ${result} similar note${result === 1 ? '' : 's'} added to "${field}:"`
-            );
+            new Notice(describeInterlinkResult(result, file.basename, field));
           } catch (e) {
             new Notice(`Interlink failed: ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -2364,9 +2382,10 @@ export default class LinkLinkPlugin extends Plugin {
     if (!this.settings.wizardShown) {
       this.settings.wizardShown = true;
       await this.saveSettings();
-      this.app.workspace.onLayoutReady(() =>
-        window.setTimeout(() => new SetupWizardModal(this.app, this).open(), 600)
-      );
+      this.app.workspace.onLayoutReady(() => {
+        const timer = window.setTimeout(() => new SetupWizardModal(this.app, this).open(), 600);
+        this.register(() => window.clearTimeout(timer));
+      });
     }
 
     this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => {
@@ -2399,7 +2418,9 @@ export default class LinkLinkPlugin extends Plugin {
       if (file instanceof TFile && file.extension === 'md') this.titleAliasIndex.removeFile(file.path);
     }));
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      if (file instanceof TFile && file.extension === 'md') this.titleAliasIndex.renameFile(file, oldPath);
+      // No .md guard here: a note renamed to a non-md extension still needs
+      // oldPath removed from the index, which renameFile() handles itself.
+      if (file instanceof TFile) this.titleAliasIndex.renameFile(file, oldPath);
     }));
     this.registerEvent(this.app.metadataCache.on('changed', (file) => {
       this.titleAliasIndex.updateFile(file);
@@ -2409,6 +2430,7 @@ export default class LinkLinkPlugin extends Plugin {
     // Linter's second write, eliminating race conditions on the index file.
     let fileSaveTimer: number | null = null;
     const pendingFiles = new Set<TFile>();
+    this.register(() => { if (fileSaveTimer) window.clearTimeout(fileSaveTimer); });
     this.registerEvent(this.app.vault.on('modify', (file) => {
       if (!(file instanceof TFile) || file.extension !== 'md') return;
       if (this.settings.autoIndexMode !== 'file-save') return;
@@ -2441,7 +2463,7 @@ export default class LinkLinkPlugin extends Plugin {
       this.titleAliasIndex.build();
       // Auto-index on startup (delayed to not block Obsidian loading)
       if (this.settings.autoIndexMode === 'startup' && this.settings.embeddingSource !== 'existing') {
-        window.setTimeout(() => {
+        const timer = window.setTimeout(() => {
           const { onProgress, onDone, onError } = this.createProgressDisplay();
           this.indexingService.index(onProgress)
             .then(({ added, updated, removed }) => {
@@ -2453,6 +2475,7 @@ export default class LinkLinkPlugin extends Plugin {
             })
             .catch(e => { onError(); console.warn('link-link: startup auto-index failed', e); });
         }, 8000);
+        this.register(() => window.clearTimeout(timer));
       }
     });
   }
@@ -2569,46 +2592,17 @@ export default class LinkLinkPlugin extends Plugin {
   }
 
   async getRelated(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
-    if (this.settings.embeddingSource === 'existing') return this.getRelatedFromExisting(file, naturalPaths);
-    return this.getRelatedFromBuiltin(file, naturalPaths);
-  }
-
-  private async getRelatedFromBuiltin(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
     let index: IndexEntry[];
     try {
-      index = await this.indexingService.loadIndex();
+      index = this.settings.embeddingSource === 'existing'
+        ? await this.loadExistingIndex()
+        : await this.indexingService.loadIndex();
     } catch {
       throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
     }
     const curr = index.find(e => e.path === file.path);
     if (!curr) throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
 
-    const results: { file: TFile; score: number }[] = [];
-    for (const e of index) {
-      if (e.path === file.path) continue;
-      const s = cosine(curr.embedding, e.embedding);
-      if (s < this.settings.threshold) continue;
-      const tf = this.app.vault.getFileByPath(e.path);
-      if (tf) results.push({ file: tf, score: s });
-    }
-    results.sort((a, b) => b.score - a.score);
-    const { topN } = this.settings;
-    if (topN === 0) return results;
-    // Natural connections (O/B) don't consume Top N slots — cap only semantic count, then merge and re-sort
-    const semantic = results.filter(r => !naturalPaths?.has(r.file.path));
-    const natural  = results.filter(r =>  naturalPaths?.has(r.file.path));
-    return [...semantic.slice(0, topN), ...natural].sort((a, b) => b.score - a.score);
-  }
-
-  private async getRelatedFromExisting(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
-    let index: IndexEntry[];
-    try {
-      index = await this.loadExistingIndex();
-    } catch {
-      throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
-    }
-    const curr = index.find(e => e.path === file.path);
-    if (!curr) throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
     const results: { file: TFile; score: number }[] = [];
     for (const e of index) {
       if (e.path === file.path) continue;
@@ -3347,12 +3341,9 @@ class SetupWizardModal extends Modal {
     // ── Field classification helper ──────────────────────────────────────
     const indexableSet = new Set(this.plugin.indexingService.getFilesToIndex().map((f: TFile) => f.path));
     const classifyField = (fieldName: string): { atRisk: number; safe: number } => {
-      const ignored  = this.S.ignoredPaths;
       const readOnly = this.S.readOnlyPaths;
-      const isExcluded = (p: string) =>
-        ignored.some(i => p === i || p.startsWith(i + '/')) ||
-        readOnly.some(r => p === r || p.startsWith(r + '/')) ||
-        !indexableSet.has(p);
+      // !indexableSet.has(p) already covers ignoredPaths/excludePaths/includePaths
+      const isExcluded = (p: string) => matchesList(p, readOnly) || !indexableSet.has(p);
       let atRisk = 0, safe = 0;
       for (const file of this.app.vault.getMarkdownFiles()) {
         if (this.app.metadataCache.getFileCache(file)?.frontmatter?.[fieldName] !== undefined) {

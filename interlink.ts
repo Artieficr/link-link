@@ -1,6 +1,11 @@
 import { App, Modal, TFile } from 'obsidian';
 import type LinkLinkPlugin from './main';
-import type { IndexEntry } from './indexing';
+import { isPathInScope, matchesList, type IndexEntry } from './indexing';
+
+// Why runForFile() didn't produce a related-notes update, distinct enough
+// for callers to show the right message instead of always suggesting a
+// re-index.
+export type InterlinkSkipReason = 'ignored' | 'read-only' | 'not-indexed';
 
 // ─── Confirmation modal ───────────────────────────────────────────────────────
 
@@ -61,29 +66,11 @@ export class InterlinkService {
   // ── Path helpers ────────────────────────────────────────────────────────
 
   isIgnored(filePath: string): boolean {
-    const { ignoredPaths, indexMode, excludePaths, includePaths } = this.plugin.settings;
-
-    if (this.matchesList(filePath, ignoredPaths)) return true;
-
-    if (indexMode === 'exclude') {
-      if (this.matchesList(filePath, excludePaths)) return true;
-    } else if (indexMode === 'include' && includePaths.length > 0) {
-      if (!this.matchesList(filePath, includePaths)) return true;
-    }
-
-    return false;
+    return !isPathInScope(filePath, this.plugin.settings);
   }
 
   isReadOnly(filePath: string): boolean {
-    return this.matchesList(filePath, this.plugin.settings.readOnlyPaths);
-  }
-
-  private matchesList(filePath: string, list: string[]): boolean {
-    for (const p of list) {
-      const norm = p.replace(/\/$/, '');
-      if (filePath === norm || filePath === norm + '.md' || filePath.startsWith(norm + '/')) return true;
-    }
-    return false;
+    return matchesList(filePath, this.plugin.settings.readOnlyPaths);
   }
 
   // ── Similarity ───────────────────────────────────────────────────────────
@@ -97,23 +84,35 @@ export class InterlinkService {
     return d === 0 ? 0 : dot / d;
   }
 
+  // Inverts metadataCache.resolvedLinks (source path -> {target path: count})
+  // into target path -> source paths, once, so getNaturalConnections() below
+  // doesn't re-scan the whole vault's link graph for every note in run()'s loop.
+  private buildBacklinkMap(): Map<string, Set<string>> {
+    const map = new Map<string, Set<string>>();
+    for (const [src, links] of Object.entries(this.app.metadataCache.resolvedLinks)) {
+      for (const dest of Object.keys(links)) {
+        let backlinkers = map.get(dest);
+        if (!backlinkers) { backlinkers = new Set(); map.set(dest, backlinkers); }
+        backlinkers.add(src);
+      }
+    }
+    return map;
+  }
+
   // Returns paths of notes that are already naturally connected (outgoing text links + backlinks).
   // These are excluded from the Top N count so frontmatter stays focused on new discoveries.
-  private getNaturalConnections(file: TFile): Set<string> {
+  private getNaturalConnections(file: TFile, backlinksByTarget: Map<string, Set<string>>): Set<string> {
     const paths = new Set<string>();
     const bodyLinks = this.app.metadataCache.getFileCache(file)?.links ?? [];
     for (const link of bodyLinks) {
       const dest = this.app.metadataCache.getFirstLinkpathDest(link.link, file.path);
       if (dest) paths.add(dest.path);
     }
-    const resolved = this.app.metadataCache.resolvedLinks;
-    for (const [src, links] of Object.entries(resolved)) {
-      if (src !== file.path && links[file.path]) paths.add(src);
-    }
+    for (const src of backlinksByTarget.get(file.path) ?? []) paths.add(src);
     return paths;
   }
 
-  findRelated(entry: IndexEntry, pool: IndexEntry[], naturalPaths?: Set<string>): string[] {
+  findRelated(entry: IndexEntry, pool: IndexEntry[], naturalPaths?: Set<string>): { path: string; title: string }[] {
     const { topN, threshold } = this.plugin.settings;
     const scores: { path: string; title: string; score: number }[] = [];
 
@@ -127,7 +126,18 @@ export class InterlinkService {
     // Natural connections (outgoing links + backlinks) don't consume Top N slots
     const semantic = sorted.filter(s => !naturalPaths?.has(s.path));
     const limited  = topN === 0 ? semantic : semantic.slice(0, topN);
-    return limited.map(s => s.title);
+    return limited.map(s => ({ path: s.path, title: s.title }));
+  }
+
+  // Resolves related-note references (from findRelated, keyed by path) into
+  // Obsidian-generated wikilinks, sourced from the actual TFile rather than a
+  // raw title string — titles containing "]]" or "|" would otherwise produce
+  // malformed, unescaped links and corrupt the frontmatter list around them.
+  private toWikilinks(links: { path: string; title: string }[], sourcePath: string): string[] {
+    return links
+      .map(l => this.app.vault.getFileByPath(l.path))
+      .filter((f): f is TFile => f !== null)
+      .map(target => this.app.fileManager.generateMarkdownLink(target, sourcePath));
   }
 
   // ── Scan for existing field ───────────────────────────────────────────────
@@ -152,6 +162,7 @@ export class InterlinkService {
     const field    = this.plugin.settings.relatedFieldName || 'related';
     const pool     = index.filter(e => !this.isIgnored(e.path));
     const writable = pool.filter(e => !this.isReadOnly(e.path));
+    const backlinksByTarget = this.buildBacklinkMap();
     let updated    = 0;
 
     for (let i = 0; i < writable.length; i++) {
@@ -160,12 +171,12 @@ export class InterlinkService {
 
       const file  = this.app.vault.getFileByPath(entry.path);
       if (!file) continue;
-      const naturalPaths = this.getNaturalConnections(file);
+      const naturalPaths = this.getNaturalConnections(file, backlinksByTarget);
       const links = this.findRelated(entry, pool, naturalPaths);
 
       // Use Obsidian's frontmatter API — handles YAML parsing/writing correctly
       await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-        if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
+        if (links.length > 0) fm[field] = this.toWikilinks(links, file.path);
       });
 
       if (links.length > 0) updated++;
@@ -175,16 +186,17 @@ export class InterlinkService {
     return { updated, skipped: writable.length - updated };
   }
 
-  async runForFile(file: TFile, index: IndexEntry[]): Promise<number | false> {
-    if (this.isIgnored(file.path) || this.isReadOnly(file.path)) return false;
+  async runForFile(file: TFile, index: IndexEntry[]): Promise<number | InterlinkSkipReason> {
+    if (this.isIgnored(file.path)) return 'ignored';
+    if (this.isReadOnly(file.path)) return 'read-only';
     const field = this.plugin.settings.relatedFieldName || 'related';
     const pool  = index.filter(e => !this.isIgnored(e.path));
     const entry = pool.find(e => e.path === file.path);
-    if (!entry) return false;
-    const naturalPaths = this.getNaturalConnections(file);
+    if (!entry) return 'not-indexed';
+    const naturalPaths = this.getNaturalConnections(file, this.buildBacklinkMap());
     const links = this.findRelated(entry, pool, naturalPaths);
     await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-      if (links.length > 0) fm[field] = links.map(l => `[[${l}]]`);
+      if (links.length > 0) fm[field] = this.toWikilinks(links, file.path);
       else delete fm[field];
     });
     return links.length;
