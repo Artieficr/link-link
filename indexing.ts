@@ -1,5 +1,6 @@
 import { App, Notice, TFile, requestUrl } from 'obsidian';
 import type LinkLinkPlugin from './main';
+import type { OllamaModel } from './main';
 
 // @xenova/transformers has no public TypeScript types; these minimal interfaces
 // cover the subset we actually call.
@@ -19,6 +20,31 @@ export function matchesList(filePath: string, list: string[]): boolean {
     if (filePath === norm || filePath === norm + '.md' || filePath.startsWith(norm + '/')) return true;
   }
   return false;
+}
+
+export function cosine(a: number[], b: number[]): number {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i];
+  }
+  const d = Math.sqrt(na) * Math.sqrt(nb);
+  return d === 0 ? 0 : dot / d;
+}
+
+export function ollamaBase(baseUrl?: string): string {
+  return (baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+}
+
+// Throws when the server is unreachable or answers non-200.
+export async function ollamaHasModel(base: string, modelName: string): Promise<boolean> {
+  const resp = await requestUrl(`${base}/api/tags`);
+  if (resp.status !== 200) throw new Error(`Ollama returned ${resp.status}`);
+  const data = resp.json as { models?: { name: string }[] };
+  return (data.models ?? []).some(m => m.name === modelName || m.name.startsWith(modelName + ':'));
+}
+
+export function activeOllama(settings: { ollamaModels: OllamaModel[] }): OllamaModel | undefined {
+  return settings.ollamaModels.find(m => m.active);
 }
 
 interface PathScopeSettings {
@@ -59,23 +85,15 @@ export class IndexingService {
   }
 
   private async ensureOllama(onProgress: (msg: string, pct: number) => void): Promise<boolean> {
-    const models = this.plugin.settings.ollamaModels;
-    const active = models.find(m => m.active);
+    const active = activeOllama(this.plugin.settings);
     if (!active) {
       new Notice('No active Ollama model configured. Go to Settings → Embedding and add one.');
       return false;
     }
-    const base = (active.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+    const base = ollamaBase(active.baseUrl);
     onProgress('Connecting to Ollama…', 2);
     try {
-      const resp = await requestUrl(`${base}/api/tags`);
-      if (resp.status !== 200) throw new Error(`Ollama returned ${resp.status}`);
-      const data = resp.json as { models?: { name: string }[] };
-      const installed = data.models ?? [];
-      const found = installed.some(
-        (m: { name: string }) => m.name === active.modelName || m.name.startsWith(active.modelName + ':')
-      );
-      if (!found) {
+      if (!await ollamaHasModel(base, active.modelName)) {
         new Notice(`Ollama model "${active.modelName}" is not installed. Run: ollama pull ${active.modelName}`);
         return false;
       }
@@ -96,7 +114,6 @@ export class IndexingService {
     onProgress('Loading embedding model…', 2);
 
     try {
-      // @ts-ignore
       const { pipeline, env } = await import('@xenova/transformers');
 
       // Load WASM runtime from CDN — the browser caches it after the first
@@ -131,10 +148,9 @@ export class IndexingService {
 
   async embed(text: string): Promise<number[]> {
     if (this.plugin.settings.embeddingSource === 'local') {
-      const models = this.plugin.settings.ollamaModels;
-      const active = models.find(m => m.active);
+      const active = activeOllama(this.plugin.settings);
       if (!active) throw new Error('No active Ollama model configured');
-      const base = (active.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+      const base = ollamaBase(active.baseUrl);
       const resp = await requestUrl({
         url: `${base}/api/embeddings`,
         method: 'POST',
@@ -180,20 +196,16 @@ export class IndexingService {
   // ── Index I/O ─────────────────────────────────────────────────────────────
 
   private get indexPath(): string {
-    if (this.plugin.settings.embeddingSource === 'local') {
-      const models = this.plugin.settings.ollamaModels;
-      const active = models.find(m => m.active);
-      if (active) return `${this.pluginDir}/link-link-index-${active.id}.json`;
-    }
-    return `${this.pluginDir}/link-link-index.json`;
+    const active = this.plugin.settings.embeddingSource === 'local' ? activeOllama(this.plugin.settings) : undefined;
+    return this.indexPathForModel(active?.id);
   }
 
-  indexPathForModel(modelId: string): string {
-    return `${this.pluginDir}/link-link-index-${modelId}.json`;
+  indexPathForModel(modelId?: string): string {
+    return `${this.pluginDir}/link-link-index${modelId ? `-${modelId}` : ''}.json`;
   }
 
   get builtinIndexPath(): string {
-    return `${this.pluginDir}/link-link-index.json`;
+    return this.indexPathForModel();
   }
 
   async loadIndex(): Promise<IndexEntry[]> {
@@ -243,6 +255,16 @@ export class IndexingService {
     return file.stat.mtime;
   }
 
+  // Splits files into those needing (re)embedding and those unchanged since the index entry.
+  private classify(files: TFile[], existingByPath: Map<string, IndexEntry>): { toEmbed: TFile[]; skipped: number } {
+    const toEmbed: TFile[] = [];
+    for (const file of files) {
+      const prev = existingByPath.get(file.path);
+      if (!(prev?.mtime !== undefined && this.getFileMtime(file) <= prev.mtime)) toEmbed.push(file);
+    }
+    return { toEmbed, skipped: files.length - toEmbed.length };
+  }
+
   // ── Change preview ────────────────────────────────────────────────────────
 
   // Returns what a full index run would do, without loading the model.
@@ -251,20 +273,12 @@ export class IndexingService {
     let existing: IndexEntry[] = [];
     try { existing = await this.loadIndex(); } catch { return null; }
 
-    const existingByPath = new Map(existing.map(e => [e.path, e]));
-    const allIndexable   = this.getFilesToIndex();
-    const currentPaths   = new Set(allIndexable.map(f => f.path));
-
-    let toEmbed = 0, unchanged = 0;
-    for (const file of allIndexable) {
-      const prev        = existingByPath.get(file.path);
-      const fileMtime   = this.getFileMtime(file);
-      const isUnchanged = prev?.mtime !== undefined && fileMtime <= prev.mtime;
-      if (isUnchanged) unchanged++; else toEmbed++;
-    }
+    const allIndexable = this.getFilesToIndex();
+    const currentPaths = new Set(allIndexable.map(f => f.path));
+    const { toEmbed, skipped: unchanged } = this.classify(allIndexable, new Map(existing.map(e => [e.path, e])));
 
     const toRemove = existing.filter(e => !currentPaths.has(e.path)).length;
-    return { toEmbed, unchanged, toRemove };
+    return { toEmbed: toEmbed.length, unchanged, toRemove };
   }
 
   // ── Unified index ─────────────────────────────────────────────────────────
@@ -290,16 +304,8 @@ export class IndexingService {
     const fullScan     = !targetFiles;
     const currentPaths = fullScan ? new Set(allIndexable.map(f => f.path)) : null;
 
-    // Classify: embed or skip
-    const toEmbed: TFile[] = [];
-    let skipped = 0;
-
-    for (const file of filesToCheck) {
-      const prev      = existingByPath.get(file.path);
-      const fileMtime = this.getFileMtime(file);
-      const unchanged = prev?.mtime !== undefined && fileMtime <= prev.mtime;
-      if (unchanged) skipped++; else toEmbed.push(file);
-    }
+    const { toEmbed, skipped: unchangedCount } = this.classify(filesToCheck, existingByPath);
+    let skipped = unchangedCount;
 
     const deletedCount = fullScan
       ? existing.filter(e => !currentPaths!.has(e.path)).length

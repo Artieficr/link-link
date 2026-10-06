@@ -13,10 +13,9 @@ import {
   TFile,
   TFolder,
   WorkspaceLeaf,
-  requestUrl,
   setIcon,
 } from 'obsidian';
-import { IndexingService, matchesList, type IndexEntry } from './indexing';
+import { IndexingService, activeOllama, cosine, matchesList, ollamaBase, ollamaHasModel, type IndexEntry } from './indexing';
 import { InterlinkService, ConfirmModal, type InterlinkSkipReason } from './interlink';
 import { TitleAliasIndex, buildLinkSuggestExtension } from './linksuggest';
 
@@ -51,7 +50,7 @@ function validateFmFieldName(value: string): string | null {
   return null;
 }
 
-interface OllamaModel {
+export interface OllamaModel {
   id: string;
   modelName: string;
   displayName: string;
@@ -194,15 +193,6 @@ class EmbeddingNotFoundError extends Error {
     public readonly fileName: string,
     public readonly source: LinkLinkSettings['embeddingSource']
   ) { super('embedding_not_found'); }
-}
-
-function cosine(a: number[], b: number[]): number {
-  let dot = 0, normA = 0, normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]; normA += a[i] * a[i]; normB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom === 0 ? 0 : dot / denom;
 }
 
 function scoreToColor(score: number, s: LinkLinkSettings, minScore = 0, maxScore = 1): string {
@@ -2594,9 +2584,7 @@ export default class LinkLinkPlugin extends Plugin {
   async getRelated(file: TFile, naturalPaths?: Set<string>): Promise<{ file: TFile; score: number }[]> {
     let index: IndexEntry[];
     try {
-      index = this.settings.embeddingSource === 'existing'
-        ? await this.loadExistingIndex()
-        : await this.indexingService.loadIndex();
+      index = await this.loadAnyIndex();
     } catch {
       throw new EmbeddingNotFoundError(file.basename, this.settings.embeddingSource);
     }
@@ -2908,7 +2896,7 @@ class SetupWizardModal extends Modal {
     super(app);
     this.plugin = plugin;
     this.chosenModel = plugin.settings.embeddingSource;
-    const active = plugin.settings.ollamaModels.find(m => m.active);
+    const active = activeOllama(plugin.settings);
     if (active) {
       this.wzOllamaName    = active.modelName;
       this.wzOllamaDisplay = active.displayName;
@@ -3034,11 +3022,7 @@ class SetupWizardModal extends Modal {
       checkBtn.disabled = true; checkBtn.setText('Checking…');
       connBadge.className = 'll-wiz-conn-badge'; connBadge.setText('');
       try {
-        const base = (urlInput.value.trim() || 'http://localhost:11434').replace(/\/$/, '');
-        const resp = await requestUrl(`${base}/api/tags`);
-        if (resp.status !== 200) throw new Error();
-        const data = resp.json as { models?: { name: string }[] };
-        const found = (data.models ?? []).some(m => m.name === mn || m.name.startsWith(mn + ':'));
+        const found = await ollamaHasModel(ollamaBase(urlInput.value.trim()), mn);
         connBadge.setText(found ? '✓ Reachable' : '! Model not found on server');
         connBadge.addClass(found ? 'll-wiz-conn-ok' : 'll-wiz-conn-warn');
         localVerified = found;
@@ -3823,17 +3807,12 @@ class LinkLinkSettingTab extends PluginSettingTab {
                 // Returns true (found), false (up but model missing), null (unreachable)
                 const ping = async (): Promise<boolean | null> => {
                   try {
-                    const base = (model.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
-                    const resp = await requestUrl(`${base}/api/tags`);
-                    if (resp.status !== 200) return null;
-                    const data = resp.json as { models?: { name: string }[] };
-                    return (data.models ?? []).some(
-                      (m: { name: string }) => m.name === model.modelName || m.name.startsWith(model.modelName + ':')
-                    );
+                    return await ollamaHasModel(ollamaBase(model.baseUrl), model.modelName);
                   } catch { return null; }
                 };
 
                 const showBadge = (r: boolean | null) => connCell.createSpan({
+                  prepend: true,
                   cls: `ll-conn-badge ${r === true ? 'll-conn-badge-ok' : r === false ? 'll-conn-badge-warn' : 'll-conn-badge-fail'}`,
                   text: r === true ? '✓ Reachable' : r === false ? '! Not installed' : '✗ Unreachable',
                 });
@@ -3843,7 +3822,7 @@ class LinkLinkSettingTab extends PluginSettingTab {
                   // Ollama can take a moment to list models after startup —
                   // if server is up but model not yet visible, wait and retry once.
                   if (first === false) {
-                    const loading = connCell.createSpan({ cls: 'll-conn-badge ll-conn-badge-warn', text: '⟳ Model loading…' });
+                    const loading = connCell.createSpan({ prepend: true, cls: 'll-conn-badge ll-conn-badge-warn', text: '⟳ Model loading…' });
                     await new Promise(r => window.setTimeout(r, 2000));
                     loading.remove();
                     showBadge(await ping());

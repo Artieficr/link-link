@@ -1,6 +1,6 @@
 import { App, Modal, TFile } from 'obsidian';
 import type LinkLinkPlugin from './main';
-import { isPathInScope, matchesList, type IndexEntry } from './indexing';
+import { cosine, isPathInScope, matchesList, type IndexEntry } from './indexing';
 
 // Why runForFile() didn't produce a related-notes update, distinct enough
 // for callers to show the right message instead of always suggesting a
@@ -75,15 +75,6 @@ export class InterlinkService {
 
   // ── Similarity ───────────────────────────────────────────────────────────
 
-  private cosine(a: number[], b: number[]): number {
-    let dot = 0, na = 0, nb = 0;
-    for (let i = 0; i < a.length; i++) {
-      dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i];
-    }
-    const d = Math.sqrt(na) * Math.sqrt(nb);
-    return d === 0 ? 0 : dot / d;
-  }
-
   // Inverts metadataCache.resolvedLinks (source path -> {target path: count})
   // into target path -> source paths, once, so getNaturalConnections() below
   // doesn't re-scan the whole vault's link graph for every note in run()'s loop.
@@ -118,7 +109,7 @@ export class InterlinkService {
 
     for (const other of pool) {
       if (other.path === entry.path) continue;
-      const score = this.cosine(entry.embedding, other.embedding);
+      const score = cosine(entry.embedding, other.embedding);
       if (score >= threshold) scores.push({ path: other.path, title: other.title, score });
     }
 
