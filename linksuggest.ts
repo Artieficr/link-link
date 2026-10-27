@@ -225,6 +225,7 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
     private onResize = () => this.scheduleReposition();
     private onScroll = () => this.scheduleReposition();
     private onKeydownCapture = (event: KeyboardEvent) => this.handleKeydownCapture(event);
+    private resizeObserver = new ResizeObserver(() => this.scheduleReposition());
 
     constructor(view: EditorView) {
       this.view = view;
@@ -235,6 +236,11 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
       // last computed screen position instead of tracking the text as the
       // editor scrolls.
       view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+      // Switching tabs hides this editor without destroying it, and the
+      // tooltips live on document.body, so they'd otherwise stay painted
+      // over whatever note is now in front. A hidden/shown editor changes
+      // size, which routes through scheduleReposition's visibility check.
+      this.resizeObserver.observe(view.dom);
     }
 
     update(update: ViewUpdate) {
@@ -276,6 +282,7 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
       window.removeEventListener('resize', this.onResize);
       this.view.dom.removeEventListener('keydown', this.onKeydownCapture, true);
       this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
+      this.resizeObserver.disconnect();
       if (this.triggerTimer !== null) window.clearTimeout(this.triggerTimer);
       this.dismissAll();
     }
@@ -305,6 +312,12 @@ export function buildLinkSuggestExtension(app: App, plugin: LinkLinkPlugin, inde
     // view), never removed — removal is reserved for actual dismissal
     // (timeout, accept, Esc, toggle off) or the underlying text being edited.
     private scheduleReposition() {
+      // Checked here rather than in the measure's write phase: CM6 may skip
+      // measuring an editor that isn't on screen, so the write would never run.
+      if (!this.view.dom.isShown()) {
+        for (const s of this.suggestions) s.tooltipEl.hide();
+        return;
+      }
       this.view.requestMeasure({
         key: this,
         // coordsAtPos can return real (non-null) coordinates for a position
