@@ -1161,12 +1161,18 @@ button.ll-btn-danger:hover { background: #b71c1c; }
   color: var(--text-muted);
   white-space: nowrap;
   align-self: center;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ll-sel-entry-preview {
   font-size: 0.82em;
   color: var(--text-normal);
   line-height: 1.4;
   flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding-top: 2px;
 }
 .ll-sel-entry:not(.expanded) .ll-sel-entry-preview { display: none; }
