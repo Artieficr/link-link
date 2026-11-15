@@ -1047,8 +1047,8 @@ class LinkLinkView extends ItemView {
     }
   }
 
-  private deactivateSelectionMode() {
-    this.textSearchState = null;
+  deactivateSelectionMode() {
+    if (this.textSearchState?.origin === 'manual') this.textSearchState = null;
     void this.refresh();
   }
 
@@ -1197,7 +1197,7 @@ class LinkLinkView extends ItemView {
 
   private getLiveModeBtnTip(): { title: string; body: string } {
     if (this.liveModeActive) {
-      return { title: 'Live Mode', body: 'Tracking your current paragraph (or last N words) as you write. Click to return to note view.' };
+      return { title: 'Live Mode', body: 'Tracking your current paragraph (or last N words) as you write. Click to turn Live Mode off and return to note view.' };
     }
     return { title: 'Live Mode', body: 'Click to automatically show notes related to what you\'re currently writing.' };
   }
@@ -1205,7 +1205,7 @@ class LinkLinkView extends ItemView {
   private updateLiveModeBtn() {
     const btn = this.liveModeBtn;
     if (!btn) return;
-    setIcon(btn, 'text-search');
+    setIcon(btn, this.liveModeActive ? 'power' : 'text-search');
     btn.toggleClass('ll-sel-icon-active', this.liveModeActive);
   }
 
@@ -1240,7 +1240,7 @@ class LinkLinkView extends ItemView {
     this.evaluateLiveMode(true);
   }
 
-  private deactivateLiveMode() {
+  deactivateLiveMode() {
     this.liveModeActive = false;
     this.liveModeIdle   = false;
     if (this.liveModeDebounceTimer !== null) {
@@ -1270,8 +1270,23 @@ class LinkLinkView extends ItemView {
       this.updateSelectionBtn();
     }
     this.createLiveModeBtn(controls);
+    this.createViewToggle(controls, () => this.renderLiveModeIdle());
 
     el.createEl('p', { text: 'Write at least 5 words to see related notes.', cls: 'll-live-idle' });
+  }
+
+  private createViewToggle(parent: HTMLElement, rerender: () => unknown) {
+    const isGraph = this.plugin.settings.viewMode === 'graph';
+    const toggle  = parent.createDiv({
+      cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
+      title: isGraph ? 'Switch to list' : 'Switch to graph',
+    });
+    setIcon(toggle.createDiv({ cls: 'll-view-toggle-knob' }), isGraph ? 'network' : 'list');
+    toggle.addEventListener('click', () => void (async () => {
+      this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
+      await this.plugin.saveData(this.plugin.settings);
+      await rerender();
+    })());
   }
 
   // Re-evaluates the tracked text window and (re)schedules the debounced
@@ -1345,17 +1360,7 @@ class LinkLinkView extends ItemView {
     }
 
     // View toggle (no refresh button in selection/live mode)
-    const toggle = controls.createDiv({
-      cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
-      title: isGraph ? 'Switch to list' : 'Switch to graph',
-    });
-    const knob = toggle.createDiv({ cls: 'll-view-toggle-knob' });
-    setIcon(knob, isGraph ? 'network' : 'list');
-    toggle.addEventListener('click', () => void (async () => {
-      this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
-      await this.plugin.saveData(this.plugin.settings);
-      this.renderSelectionModePanel();
-    })());
+    this.createViewToggle(controls, () => this.renderSelectionModePanel());
 
     if (state.results.length === 0) {
       el.createEl('p', { text: 'No related notes above threshold.', cls: 'll-empty' });
@@ -1452,17 +1457,7 @@ class LinkLinkView extends ItemView {
         }
       );
 
-      const toggle  = controls.createDiv({
-        cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
-        title: isGraph ? 'Switch to list' : 'Switch to graph',
-      });
-      const knob = toggle.createDiv({ cls: 'll-view-toggle-knob' });
-      setIcon(knob, isGraph ? 'network' : 'list');
-      toggle.addEventListener('click', () => void (async () => {
-        this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
-        await this.plugin.saveData(this.plugin.settings);
-        await this.refresh();
-      })());
+      this.createViewToggle(controls, () => this.refresh());
 
       if (results.length === 0) {
         el.createEl('p', {
@@ -1510,17 +1505,7 @@ class LinkLinkView extends ItemView {
     }
 
     const isGraph = this.plugin.settings.viewMode === 'graph';
-    const toggle  = controls.createDiv({
-      cls: 'll-view-toggle' + (isGraph ? ' is-graph' : ''),
-      title: isGraph ? 'Switch to list' : 'Switch to graph',
-    });
-    const knob = toggle.createDiv({ cls: 'll-view-toggle-knob' });
-    setIcon(knob, isGraph ? 'network' : 'list');
-    toggle.addEventListener('click', () => void (async () => {
-      this.plugin.settings.viewMode = isGraph ? 'list' : 'graph';
-      await this.plugin.saveData(this.plugin.settings);
-      await this.refresh();
-    })());
+    this.createViewToggle(controls, () => this.refresh());
 
     const { outgoingPaths, backlinkPaths } = this.plugin.getOutgoingAndBacklinkPaths(activeFile);
     const results: ResultEntry[] = [...new Set([...outgoingPaths, ...backlinkPaths])]
@@ -4669,6 +4654,9 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addToggle(t => t.setValue(S.selectionModeEnabled).onChange(v => {
           void (async () => {
             S.selectionModeEnabled = v;
+            // Its header button disappears, so an active selection would have no way out.
+            const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+            if (!v && view instanceof LinkLinkView) view.deactivateSelectionMode();
             await save();
             settingsWrap.setCssStyles({ display: v ? '' : 'none' });
           })();
@@ -4736,6 +4724,9 @@ class LinkLinkSettingTab extends PluginSettingTab {
         .addToggle(t => t.setValue(S.liveModeEnabled).onChange(v => {
           void (async () => {
             S.liveModeEnabled = v;
+            // Its header button disappears, so active Live Mode would have no way out.
+            const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+            if (!v && view instanceof LinkLinkView) view.deactivateLiveMode();
             await save();
             liveSettingsWrap.setCssStyles({ display: v ? '' : 'none' });
           })();
