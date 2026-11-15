@@ -703,7 +703,9 @@ class GraphSimulation {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
-        const d2 = Math.max(dx * dx + dy * dy, 4);
+        // Floor at ~one node diameter: overlapping nodes in a dense cluster get a
+        // bounded push instead of a near-infinite 1/d² kick that flings them out.
+        const d2 = Math.max(dx * dx + dy * dy, 144);
         const d  = Math.sqrt(d2), f = repelK / d2;
         const fx = (dx / d) * f, fy = (dy / d) * f;
         if (!nodes[i].pinned) { nodes[i].fx -= fx; nodes[i].fy -= fy; }
@@ -737,9 +739,14 @@ class GraphSimulation {
       n.fy += (cy - n.y) * centerK;
     }
 
+    // Speed cap: when forces pile up in a crowded spot, nodes still move in the
+    // right direction but can't overshoot and start oscillating across the graph.
+    const maxV = 8 * s;
     for (const n of nodes) {
       if (n.pinned || n === this.dragNode) continue;
       n.vx = (n.vx + n.fx) * 0.87; n.vy = (n.vy + n.fy) * 0.87;
+      const v = Math.hypot(n.vx, n.vy);
+      if (v > maxV) { n.vx *= maxV / v; n.vy *= maxV / v; }
       n.x += n.vx; n.y += n.vy;
     }
 
